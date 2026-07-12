@@ -68,10 +68,10 @@ def cmd_scan(
     if library:
         for lib in cfg.libraries:
             if lib.name == library:
-                typer.echo(json.dumps(scan_library(cfg, lib, force=force), indent=2))
+                typer.echo(json.dumps(scan_library(cfg, lib, force=force, trigger="cli"), indent=2))
                 return
         raise typer.BadParameter(f"no such library: {library}")
-    summaries = scan_all(cfg, force=force)
+    summaries = scan_all(cfg, force=force, trigger="cli")
     typer.echo(json.dumps(summaries, indent=2))
 
 
@@ -183,7 +183,7 @@ def cmd_rescan(path: str) -> None:
     """Force-rescan a single path."""
     cfg = _load_cfg(None)
     configure(cfg, _config_path())
-    outcome = manual_rescan_path(cfg, path)
+    outcome = manual_rescan_path(cfg, path, trigger="cli")
     typer.echo(outcome)
 
 

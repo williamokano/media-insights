@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-07-12
+
+### Added
+
+- Scans are no longer silent. Every scan now logs a start line and a finish
+  summary at `INFO` (`scan started: library=... trigger=... path=... force=...`
+  / `scan finished: ... seen=N added=N changed=N unchanged=N removed=N
+  errors=N duration=Ns`), tagged with a `trigger` (`cli`, `api`, `scheduled`,
+  `watcher`, `library-added`) so it's clear *why* a given scan ran. Added or
+  changed files are logged individually at `INFO`; unchanged files log at
+  `DEBUG` to avoid drowning out everything else on a re-scan.
+- The event dispatcher now logs why events show as `skipped` in the `/events`
+  page (no `webhooks`/`exec_hooks` configured), and logs successful
+  deliveries too — previously it only ever logged failures.
+- `trigger` is also included in the JSON scan summary returned by the CLI
+  and `POST /api/scan`.
+
 ## [0.0.4] - 2026-07-12
 
 ### Fixed
@@ -88,7 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (amd64/arm64) with `PUID`/`PGID` support,
   published to GHCR on tagged releases.
 
-[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.0.5...HEAD
+[0.0.5]: https://github.com/williamokano/media-insights/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/williamokano/media-insights/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/williamokano/media-insights/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/williamokano/media-insights/compare/v0.0.1...v0.0.2

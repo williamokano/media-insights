@@ -69,6 +69,12 @@ class Dispatcher:
             if not webhooks and not exec_hooks:
                 # No delivery targets: keep the events as audit rows, but
                 # don't burn retry attempts or flag them as failures.
+                if events:
+                    log.info(
+                        "no webhooks/exec_hooks configured; marking %d event(s) as "
+                        "skipped (see webhooks:/exec_hooks: in config.yaml to deliver them)",
+                        len(events),
+                    )
                 for event in events:
                     event.delivery_status = "skipped"
                 return len(events)
@@ -95,6 +101,7 @@ class Dispatcher:
                 log.warning("webhook %s failed for event %s: %s", webhook.name, event.id, exc)
                 last_error = str(exc)
             else:
+                log.info("delivered event %s (%s) to webhook %s", event.id, event.type, webhook.name)
                 any_success = True
         for hook in exec_hooks:
             try:
@@ -103,6 +110,7 @@ class Dispatcher:
                 log.warning("exec hook %s failed for event %s: %s", hook.name, event.id, exc)
                 last_error = str(exc)
             else:
+                log.info("delivered event %s (%s) to exec hook %s", event.id, event.type, hook.name)
                 any_success = True
 
         with session_scope() as session:

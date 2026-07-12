@@ -123,19 +123,19 @@ def _debounced_rescan(cfg: AppConfig, path) -> None:
             owning = _lib_for_missing(cfg, target)
             if owning:
                 log.info("watcher -> deletion under %s, rescanning library", owning.name)
-                scan_library(cfg, owning)
+                scan_library(cfg, owning, trigger="watcher")
         return
     if target.is_dir():
         owning = _lib_for(cfg, target)
         if owning:
             log.info("watcher -> scan library %s", owning.name)
-            scan_library(cfg, owning)
+            scan_library(cfg, owning, trigger="watcher")
         return
     if target.suffix.lower() not in VIDEO_EXTS:
         return
     log.info("watcher -> rescan %s", target)
     try:
-        manual_rescan_path(cfg, str(target))
+        manual_rescan_path(cfg, str(target), trigger="watcher")
     except Exception as exc:
         log.warning("watcher rescan failed for %s: %s", target, exc)
 
@@ -200,7 +200,7 @@ def _background_scan(cfg: AppConfig, lib: LibraryConfig) -> None:
 
     def run() -> None:
         try:
-            scan_library(cfg, lib, force=False)
+            scan_library(cfg, lib, force=False, trigger="library-added")
         except Exception:
             log.exception("background scan of %s failed", lib.name)
 
@@ -414,9 +414,9 @@ def create_app() -> FastAPI:
         if library:
             for lib in cfg.libraries:
                 if lib.name == library:
-                    return scan_library(cfg, lib, force=True)
+                    return scan_library(cfg, lib, force=True, trigger="api")
             raise HTTPException(404, f"no such library: {library}")
-        return {"libraries": scan_all(cfg, force=True)}
+        return {"libraries": scan_all(cfg, force=True, trigger="api")}
 
     @app.post("/api/rescan")
     def rescan_path(body: dict) -> dict:
@@ -424,7 +424,7 @@ def create_app() -> FastAPI:
         if cfg is None or not body.get("path"):
             raise HTTPException(400, "path is required")
         try:
-            outcome = manual_rescan_path(cfg, body["path"])
+            outcome = manual_rescan_path(cfg, body["path"], trigger="api")
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"outcome": outcome}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import threading
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -259,7 +260,9 @@ def _ensure_db(cfg: AppConfig) -> None:
     ensure_schema()
 
 
-def scan_library(cfg: AppConfig, lib: LibraryConfig, *, force: bool = False) -> dict[str, Any]:
+def scan_library(
+    cfg: AppConfig, lib: LibraryConfig, *, force: bool = False, trigger: str = "manual"
+) -> dict[str, Any]:
     """Scan a single library; return a summary dict.
 
     Each file gets its own short transaction instead of one transaction for
@@ -271,11 +274,18 @@ def scan_library(cfg: AppConfig, lib: LibraryConfig, *, force: bool = False) -> 
     mid-scan error can't poison the rest of the run: a failed transaction
     only takes down that one file's session, which gets rolled back and
     closed on the way out, and the next file starts a fresh one.
+
+    `trigger` is purely for observability -- it's recorded in the summary
+    and logged, so "why did a scan just run" is answerable from the logs
+    (cli, api, scheduled, watcher, library-added) instead of a guess.
     """
     _ensure_db(cfg)
     started = dt.datetime.now(dt.UTC)
+    perf_start = time.monotonic()
+    log.info("scan started: library=%s trigger=%s path=%s force=%s", lib.name, trigger, lib.path, force)
     summary: dict[str, Any] = {
         "library": lib.name,
+        "trigger": trigger,
         "files_seen": 0,
         "items_added": 0,
         "files_added": 0,
@@ -285,6 +295,18 @@ def scan_library(cfg: AppConfig, lib: LibraryConfig, *, force: bool = False) -> 
         "errors": 0,
         "started_at": started.isoformat(),
     }
+
+    def _finish() -> dict[str, Any]:
+        summary["finished_at"] = dt.datetime.now(dt.UTC).isoformat()
+        log.info(
+            "scan finished: library=%s trigger=%s seen=%d added=%d changed=%d "
+            "unchanged=%d removed=%d errors=%d duration=%.1fs",
+            lib.name, trigger, summary["files_seen"], summary["files_added"],
+            summary["files_changed"], summary["files_unchanged"], summary["files_removed"],
+            summary["errors"], time.monotonic() - perf_start,
+        )
+        return summary
+
     with _lock_for(lib.name):
         with session_scope() as session:
             library_id = get_or_create_library(session, lib).id
@@ -299,8 +321,7 @@ def scan_library(cfg: AppConfig, lib: LibraryConfig, *, force: bool = False) -> 
                     )
             except LibraryGoneError:
                 log.info("library %s deleted mid-scan; stopping", lib.name)
-                summary["finished_at"] = dt.datetime.now(dt.UTC).isoformat()
-                return summary
+                return _finish()
             except Exception as exc:
                 log.exception("scan failed for %s: %s", found.path, exc)
                 summary["errors"] += 1
@@ -314,8 +335,7 @@ def scan_library(cfg: AppConfig, lib: LibraryConfig, *, force: bool = False) -> 
                 _reclassify_library(session, library)
         except LibraryGoneError:
             log.info("library %s deleted before prune/reclassify; skipping", lib.name)
-    summary["finished_at"] = dt.datetime.now(dt.UTC).isoformat()
-    return summary
+    return _finish()
 
 
 def _process_file(
@@ -349,6 +369,7 @@ def _process_file(
         )
         if existing.fingerprint == digest and existing.mtime == mtime:
             existing.last_seen = dt.datetime.now(dt.UTC)
+            log.debug("file unchanged: %s", found.path)
             return "files_unchanged"
 
     # Probe and persist
@@ -362,6 +383,7 @@ def _process_file(
 
     old_snapshot = _file_snapshot(file_row) if existing is not None else None
 
+    log.debug("probing: %s", found.path)
     probe_result = probe_file(found.path, ffprobe_bin=cfg.ffmpeg.ffprobe)
     _apply_probe(
         file_row,
@@ -375,6 +397,12 @@ def _process_file(
 
     new_snapshot = _file_snapshot(file_row)
     if old_snapshot is not None and _has_meaningful_change(old_snapshot, new_snapshot):
+        log.info(
+            "file changed: %s (codec %s -> %s, audio %s -> %s)",
+            file_row.path,
+            old_snapshot.get("video_codec"), new_snapshot.get("video_codec"),
+            old_snapshot.get("audio_summary"), new_snapshot.get("audio_summary"),
+        )
         bus.record_event(
             session,
             type_="file.changed",
@@ -385,6 +413,7 @@ def _process_file(
         )
         return "files_changed"
     if existing is None:
+        log.info("file added: %s", file_row.path)
         bus.record_event(
             session,
             type_="file.added",
@@ -394,6 +423,7 @@ def _process_file(
             new=new_snapshot,
         )
         return "files_added"
+    log.debug("file re-probed, no meaningful change: %s", found.path)
     return "files_unchanged"
 
 
@@ -504,12 +534,15 @@ def _reclassify_library(session: Session, library: Library) -> None:
             item.classification_reasons = result.reasons
 
 
-def scan_all(cfg: AppConfig, *, force: bool = False) -> list[dict]:
+def scan_all(cfg: AppConfig, *, force: bool = False, trigger: str = "manual") -> list[dict]:
     _ensure_db(cfg)
-    return [scan_library(cfg, lib, force=force) for lib in cfg.libraries]
+    log.info("deep scan started: trigger=%s libraries=%d", trigger, len(cfg.libraries))
+    results = [scan_library(cfg, lib, force=force, trigger=trigger) for lib in cfg.libraries]
+    log.info("deep scan finished: trigger=%s libraries=%d", trigger, len(cfg.libraries))
+    return results
 
 
-def manual_rescan_path(cfg: AppConfig, path: str) -> str:
+def manual_rescan_path(cfg: AppConfig, path: str, *, trigger: str = "manual") -> str:
     """Scan a single path in its owning library. Returns the outcome key."""
     _ensure_db(cfg)
     target = Path(path)
@@ -517,6 +550,7 @@ def manual_rescan_path(cfg: AppConfig, path: str) -> str:
     if owning is None:
         raise ValueError(f"{path} is not under any configured library")
 
+    log.info("rescan started: path=%s trigger=%s", target, trigger)
     with _lock_for(owning.name), session_scope() as session:
         library = get_or_create_library(session, owning)
         found = FoundFile(
@@ -526,6 +560,7 @@ def manual_rescan_path(cfg: AppConfig, path: str) -> str:
         )
         outcome = _process_file(session, cfg, library, found, force=True)
         _reclassify_library(session, library)
+    log.info("rescan finished: path=%s trigger=%s outcome=%s", target, trigger, outcome)
     return outcome
 
 

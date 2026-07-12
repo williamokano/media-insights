@@ -40,7 +40,6 @@ class ScanScheduler:
 
     def _run(self) -> None:
         try:
-            results = scan_all(self._cfg, force=False)
-            log.info("periodic scan finished: %s", results)
+            scan_all(self._cfg, force=False, trigger="scheduled")
         except Exception as exc:
             log.exception("periodic scan failed: %s", exc)

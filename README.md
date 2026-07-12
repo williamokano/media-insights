@@ -162,6 +162,30 @@ Override anything from the environment with `MI_`-prefixed env vars, using
 `MI_WATCHER__OBSERVER=polling`, `MI_SERVER__PORT=9000`. List-valued fields
 (`libraries`, `webhooks`, `exec_hooks`) can only be set in the YAML file.
 
+## Logs
+
+Every scan (however it was triggered) logs a start line and a finish summary
+at `INFO`, tagged with why it ran:
+
+```
+scan started: library=Movies trigger=api path=/data/movies force=True
+file added: /data/movies/Interstellar (2014)/Interstellar.2014.mkv
+scan finished: library=Movies trigger=api seen=42 added=1 changed=0 unchanged=41 removed=0 errors=0 duration=3.2s
+```
+
+`trigger` is one of `cli`, `api`, `scheduled`, `watcher`, or `library-added`,
+so you can tell a scheduled deep scan apart from someone clicking "Rescan".
+Files that are added or changed are logged individually at `INFO`; unchanged
+files (the common case on a re-scan) log at `DEBUG` so they don't drown out
+everything else — set `MI_LOG_LEVEL=DEBUG` (or `--verbose` on the CLI) to see
+every file, including the exact moment each one is being probed.
+
+If the `/events` page shows deliveries as **skipped**, that's expected until
+you configure at least one entry under `webhooks:` or `exec_hooks:` in
+`config.yaml` — the dispatcher logs this explicitly the first time it
+happens (`no webhooks/exec_hooks configured; marking N event(s) as
+skipped`), and successful deliveries are logged too.
+
 ## Managing libraries
 
 Editing `libraries:` in `config.yaml` and restarting works, but you don't
