@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-07-12
+
+### Fixed
+
+- Fixed a `database is locked` bug that could occur during scans, especially
+  on larger libraries or when a scheduled deep scan, a manual "Rescan"
+  click, and a watcher-triggered rescan happened to overlap. `scan_library()`
+  used to hold one long-lived transaction for an entire library scan;
+  SQLite allows exactly one writer, so any other writer that showed up
+  mid-scan (the event dispatcher, another scan) had nowhere to go. Each
+  file now gets its own short transaction instead, and scans of the same
+  library now queue up behind a per-library lock rather than racing each
+  other. Also added a 30s `busy_timeout` pragma as a second line of
+  defense, and fixed the error handling so a mid-scan failure can no longer
+  cascade into `PendingRollbackError` on every statement for the rest of
+  that scan.
+
 ## [0.0.3] - 2026-07-12
 
 ### Fixed
@@ -71,7 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (amd64/arm64) with `PUID`/`PGID` support,
   published to GHCR on tagged releases.
 
-[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.0.3...HEAD
+[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/williamokano/media-insights/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/williamokano/media-insights/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/williamokano/media-insights/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/williamokano/media-insights/releases/tag/v0.0.1

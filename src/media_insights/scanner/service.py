@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import threading
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,29 @@ from media_insights.probe import ProbeResult
 from media_insights.probe import probe as probe_file
 
 log = logging.getLogger(__name__)
+
+# One lock per library name, so a scheduled deep scan, a manual "Rescan"
+# click, and a watcher-triggered rescan of the *same* library queue up
+# instead of running concurrently. Different libraries still scan in
+# parallel; the dict only ever grows to the number of configured libraries.
+_scan_locks: dict[str, threading.Lock] = {}
+_scan_locks_guard = threading.Lock()
+
+
+def _lock_for(library_name: str) -> threading.Lock:
+    with _scan_locks_guard:
+        return _scan_locks.setdefault(library_name, threading.Lock())
+
+
+class LibraryGoneError(RuntimeError):
+    """The library row was deleted (e.g. via ?purge=true) mid-scan."""
+
+
+def _require_library(session: Session, library_id: int) -> Library:
+    library = session.get(Library, library_id)
+    if library is None:
+        raise LibraryGoneError(f"library {library_id} was deleted mid-scan")
+    return library
 
 
 def get_or_create_library(session: Session, lib: LibraryConfig) -> Library:
@@ -236,7 +260,18 @@ def _ensure_db(cfg: AppConfig) -> None:
 
 
 def scan_library(cfg: AppConfig, lib: LibraryConfig, *, force: bool = False) -> dict[str, Any]:
-    """Scan a single library; return a summary dict."""
+    """Scan a single library; return a summary dict.
+
+    Each file gets its own short transaction instead of one transaction for
+    the whole library. ffprobe on a single file is milliseconds to a couple
+    seconds; probing a whole library can take minutes. SQLite allows exactly
+    one writer, so holding one open transaction for the entire scan would
+    block every other writer (the event dispatcher, a concurrent rescan, the
+    watcher) for that whole duration. Splitting per-file also means a
+    mid-scan error can't poison the rest of the run: a failed transaction
+    only takes down that one file's session, which gets rolled back and
+    closed on the way out, and the next file starts a fresh one.
+    """
     _ensure_db(cfg)
     started = dt.datetime.now(dt.UTC)
     summary: dict[str, Any] = {
@@ -250,21 +285,35 @@ def scan_library(cfg: AppConfig, lib: LibraryConfig, *, force: bool = False) -> 
         "errors": 0,
         "started_at": started.isoformat(),
     }
-    with session_scope() as session:
-        library = get_or_create_library(session, lib)
+    with _lock_for(lib.name):
+        with session_scope() as session:
+            library_id = get_or_create_library(session, lib).id
+
         for found in iter_video_files(lib.path, recursive=True):
             summary["files_seen"] += 1
             try:
-                outcome = _process_file(
-                    session, cfg, library, found, force=force, summary=summary
-                )
+                with session_scope() as session:
+                    library = _require_library(session, library_id)
+                    outcome = _process_file(
+                        session, cfg, library, found, force=force, summary=summary
+                    )
+            except LibraryGoneError:
+                log.info("library %s deleted mid-scan; stopping", lib.name)
+                summary["finished_at"] = dt.datetime.now(dt.UTC).isoformat()
+                return summary
             except Exception as exc:
                 log.exception("scan failed for %s: %s", found.path, exc)
                 summary["errors"] += 1
                 continue
             summary[outcome] = summary.get(outcome, 0) + 1
-        summary["files_removed"] = _prune_missing(session, library)
-        _reclassify_library(session, library)
+
+        try:
+            with session_scope() as session:
+                library = _require_library(session, library_id)
+                summary["files_removed"] = _prune_missing(session, library)
+                _reclassify_library(session, library)
+        except LibraryGoneError:
+            log.info("library %s deleted before prune/reclassify; skipping", lib.name)
     summary["finished_at"] = dt.datetime.now(dt.UTC).isoformat()
     return summary
 
@@ -468,7 +517,7 @@ def manual_rescan_path(cfg: AppConfig, path: str) -> str:
     if owning is None:
         raise ValueError(f"{path} is not under any configured library")
 
-    with session_scope() as session:
+    with _lock_for(owning.name), session_scope() as session:
         library = get_or_create_library(session, owning)
         found = FoundFile(
             path=target,

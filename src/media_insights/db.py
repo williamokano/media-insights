@@ -34,7 +34,10 @@ def init_engine(url: str) -> Engine:
     _engine = create_engine(url, future=True, connect_args=connect_args, pool_pre_ping=True)
 
     if url.startswith("sqlite"):
-        # WAL = many readers, one writer; ideal for a media server
+        # WAL = many readers, one writer; ideal for a media server.
+        # busy_timeout matters just as much: without it, a writer that finds
+        # the database locked fails immediately instead of waiting, and the
+        # scanner easily holds a write lock for a moment while probing files.
         @event.listens_for(_engine, "connect")
         def _set_sqlite_pragmas(dbapi_conn, _):
             cur = dbapi_conn.cursor()
@@ -42,6 +45,7 @@ def init_engine(url: str) -> Engine:
             cur.execute("PRAGMA synchronous=NORMAL")
             cur.execute("PRAGMA foreign_keys=ON")
             cur.execute("PRAGMA temp_store=MEMORY")
+            cur.execute("PRAGMA busy_timeout=30000")
             cur.close()
 
     _SessionLocal = sessionmaker(_engine, expire_on_commit=False, autoflush=False)
