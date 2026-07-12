@@ -3,12 +3,11 @@ loader so the URL is in one place (config.yaml)."""
 
 from __future__ import annotations
 
-import os
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from alembic import context
 from media_insights.config import load_config
 from media_insights.db import init_engine
 from media_insights.models import Base
