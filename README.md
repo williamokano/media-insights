@@ -4,6 +4,8 @@ Indexer and classifier for media libraries. Probe every file with **ffprobe** (a
 
 Designed for an `*-arr`-style Docker deployment: one `/config` volume for state, one `/data` volume (or many) for the libraries you want indexed.
 
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
 ## Features
 
 - **Manage libraries from the UI or API — no restart needed.** Add, rename, or remove libraries from `/libraries` or `POST/PUT/DELETE /api/libraries`; changes write straight back into `config.yaml` (comments preserved) and the filesystem watcher picks up the new path immediately.
