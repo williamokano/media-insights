@@ -1,6 +1,6 @@
 [project]
 name = "media-insights"
-version = "0.1.0"
+version = "0.0.1"
 description = "Indexer and classifier for media libraries: probe files, track changes, classify anime/tv/movie, emit notifications."
 readme = "README.md"
 requires-python = ">=3.12"

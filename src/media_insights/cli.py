@@ -39,9 +39,10 @@ def _root(
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """media-insights command-line."""
+    # DB initialization is deferred to the commands that need it, so
+    # `version`, `config`, and `--help` work without a writable config_dir.
     cfg = _load_cfg(config)
     _setup_logging("DEBUG" if verbose else cfg.log_level)
-    configure(cfg)
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
         raise typer.Exit()
@@ -73,6 +74,7 @@ def cmd_serve(
     import uvicorn
 
     cfg = _load_cfg(None)
+    configure(cfg)
     bind_host = host or cfg.server.host
     bind_port = port or cfg.server.port
     api_app = create_app()

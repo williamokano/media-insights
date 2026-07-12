@@ -169,7 +169,9 @@ def _identity_snapshot(item: MediaItem) -> dict:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="media-insights", version="0.1.0", lifespan=lifespan)
+    from media_insights import __version__
+
+    app = FastAPI(title="media-insights", version=__version__, lifespan=lifespan)
     static_dir = _static_dir()
     templates_dir = _templates_dir()
     if static_dir.is_dir():

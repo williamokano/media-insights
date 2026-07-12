@@ -16,24 +16,43 @@ Designed for an `*-arr`-style Docker deployment: one `/config` volume for state,
 
 [guessit]: https://github.com/guessit-io/guessit
 
-## Quickstart — Docker (recommended)
+## Running with Docker (recommended)
+
+Use the published image — no clone required. Create a folder for the config,
+drop a `docker-compose.yml` next to it, and start:
+
+```yaml
+# docker-compose.yml
+services:
+  media-insights:
+    image: ghcr.io/williamokano/media-insights:latest
+    container_name: media-insights
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./config:/config            # config.yaml + database live here
+      - /path/to/movies:/data/movies:ro
+      - /path/to/tv:/data/tv:ro
+      - /path/to/anime:/data/anime:ro
+    environment:
+      PUID: "1000"                  # match your host user (id -u / id -g)
+      PGID: "1000"
+      # MI_WATCHER__OBSERVER: polling   # uncomment on NFS/SMB mounts
+```
 
 ```bash
-git clone https://github.com/<you>/media-insights
-cd media-insights
-
-# 1. Create your config (mount this into /config)
 mkdir config
-cp config.example.yaml config/config.yaml
-$EDITOR config/config.yaml   # edit libraries, webhooks, etc.
+curl -o config/config.yaml \
+  https://raw.githubusercontent.com/williamokano/media-insights/main/config.example.yaml
+$EDITOR config/config.yaml    # point `libraries:` at your /data mounts
 
-# 2. Run
 docker compose up -d
 ```
 
-The default `docker-compose.yml` mounts `config/` to `/config` and example
-media paths to `/data/{movies,tv,anime}`. Adjust the paths to match your
-library layout. Open <http://localhost:8765> for the Web UI.
+Open <http://localhost:8765> for the Web UI (API docs at `/docs`). On first
+start the service scans every configured library; after that the watcher and
+the cron deep-scan keep it current.
 
 Volumes:
 
@@ -45,15 +64,29 @@ Set `PUID` / `PGID` (default `1000:1000`) to run the service as your host
 user — the same convention as the arr stack. The entrypoint remaps the
 internal user, chowns `/config`, and drops privileges before starting.
 
-## Quickstart — uv (local dev)
+To build the image yourself instead, clone the repo and use the checked-in
+`docker-compose.yml` (it has a `build: .` directive):
 
 ```bash
-git clone https://github.com/<you>/media-insights
+git clone https://github.com/williamokano/media-insights
+cd media-insights
+mkdir config && cp config.example.yaml config/config.yaml
+docker compose up -d --build
+```
+
+## Running locally with uv
+
+```bash
+git clone https://github.com/williamokano/media-insights
 cd media-insights
 
 uv sync --extra dev           # creates .venv with runtime + dev deps
-uv run media-insights --config config/config.yaml scan
-uv run media-insights --config config/config.yaml serve
+
+mkdir config && cp config.example.yaml config/config.yaml
+$EDITOR config/config.yaml    # set config_dir/data_dir + libraries to local paths
+
+uv run media-insights --config config/config.yaml scan    # one-shot index
+uv run media-insights --config config/config.yaml serve   # API + Web UI
 ```
 
 ffmpeg (specifically `ffprobe`) must be in your `$PATH` for the probe layer
@@ -311,8 +344,8 @@ guarded by `if: secrets.DOCKERHUB_USERNAME != ''`, so it no-ops until you
 add those secrets in the repository settings.
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.0.1
+git push origin v0.0.1
 ```
 
 ## License
