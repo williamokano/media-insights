@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{% block title %}media-insights{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/dashboard">media-insights</a>
+  <nav>
+    <a href="/dashboard">Dashboard</a>
+    <a href="/libraries">Libraries</a>
+    <a href="/unmatched">Unmatched</a>
+    <a href="/events">Events</a>
+    <a href="/search">Search</a>
+    <a href="/api/libraries" target="_blank" rel="noopener">API</a>
+  </nav>
+</header>
+<main class="container">
+{% block content %}{% endblock %}
+</main>
+<footer class="footer">media-insights &mdash; local-first media indexing</footer>
+</body>
+</html>

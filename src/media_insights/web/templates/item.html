@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ item.title }} &middot; media-insights{% endblock %}
+{% block content %}
+<h1>{{ item.title }} {% if item.year %}<span class="year">({{ item.year }})</span>{% endif %}</h1>
+<dl class="metadata">
+  <dt>Classification</dt><dd>
+    {{ item.classification_label or '?' }}
+    {% if item.classification_confidence is not none %}
+      <span class="conf">({{ '%.0f%%' % (item.classification_confidence * 100) }})</span>
+    {% endif %}
+    <form hx-post="/api/items/{{ item.id }}/classification" hx-target="this" hx-swap="none" style="display:inline">
+      <select name="label" onchange="this.form.submit()">
+        <option value="">override&hellip;</option>
+        <option value="movie">movie</option>
+        <option value="tv">tv</option>
+        <option value="anime">anime</option>
+      </select>
+    </form>
+  </dd>
+  <dt>Match</dt><dd>{{ item.match_status }}</dd>
+  <dt>External IDs</dt><dd>
+    {% if item.imdb_id %}IMDb {{ item.imdb_id }} {% endif %}
+    {% if item.tmdb_id %}TMDb {{ item.tmdb_id }} {% endif %}
+    {% if item.tvdb_id %}TVDb {{ item.tvdb_id }} {% endif %}
+    {% if item.anidb_id %}AniDB {{ item.anidb_id }} {% endif %}
+  </dd>
+  {% if item.classification_reasons %}
+  <dt>Reasons</dt>
+  <dd><ul class="reasons">
+    {% for r in item.classification_reasons %}<li>{{ r }}</li>{% endfor %}
+  </ul></dd>
+  {% endif %}
+</dl>
+
+<section class="panel">
+  <h2>Identify</h2>
+  <form id="identify-form" onsubmit="submitIdentify(event)">
+    <input name="imdb_id" placeholder="imdb (tt1234567)">
+    <input name="tmdb_id" placeholder="tmdb (123)">
+    <input name="tvdb_id" placeholder="tvdb (123)">
+    <input name="anidb_id" placeholder="anidb (123)">
+    <button type="submit">Save</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Files</h2>
+  {% for season in item.seasons %}
+    <h3>{% if season.number is none %}Specials / unsorted{% else %}Season {{ season.number }}{% endif %}</h3>
+    <table>
+      <thead><tr><th>Path</th><th>Container</th><th>Resolution</th><th>Codec</th><th>Audio</th><th>Subs</th></tr></thead>
+      <tbody>
+        {% for f in season.files %}
+        <tr>
+          <td><code>{{ f.path }}</code></td>
+          <td>{{ f.container or '?' }}</td>
+          <td>
+            {% if f.video_width %}{{ f.video_width }}x{{ f.video_height }}{% endif %}
+            {% if f.video_dynamic_range and f.video_dynamic_range != 'SDR' %}
+              <span class="hdr">{{ f.video_dynamic_range }}</span>
+            {% endif %}
+          </td>
+          <td>{{ f.video_codec or '?' }}</td>
+          <td>{{ f.audio_summary or '?' }}</td>
+          <td>{{ f.subtitle_summary or '?' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endfor %}
+</section>
+
+<script>
+async function submitIdentify(ev) {
+  ev.preventDefault();
+  const fd = new FormData(ev.target);
+  const body = {};
+  for (const [k, v] of fd.entries()) if (v) body[k] = v;
+  await fetch('/api/items/{{ item.id }}/identify', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  location.reload();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Events &middot; media-insights{% endblock %}
+{% block content %}
+<h1>Change events</h1>
+{% if not events %}<p class="empty">No events recorded yet.</p>{% endif %}
+<table>
+  <thead>
+    <tr><th>Time (UTC)</th><th>Type</th><th>Subject</th><th>Status</th><th>Attempts</th><th>Error</th></tr>
+  </thead>
+  <tbody>
+    {% for event in events %}
+    <tr>
+      <td>{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+      <td><span class="event-type">{{ event.type }}</span></td>
+      <td><code>{{ event.subject_path or '-' }}</code></td>
+      <td><span class="event-status status-{{ event.delivery_status }}">{{ event.delivery_status }}</span></td>
+      <td>{{ event.delivery_attempts }}</td>
+      <td><code class="error">{{ event.last_error or '' }}</code></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

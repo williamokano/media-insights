@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Libraries &middot; media-insights{% endblock %}
+{% block content %}
+<h1>Libraries</h1>
+<table>
+  <thead><tr><th>Name</th><th>Path</th><th>Kind</th><th>Titles</th><th>Action</th></tr></thead>
+  <tbody>
+    {% for lib in libraries %}
+    <tr>
+      <td>{{ lib.name }}</td>
+      <td><code>{{ lib.path }}</code></td>
+      <td>{{ lib.kind }}</td>
+      <td>{{ lib.items|length }}</td>
+      <td>
+        <form method="post" action="/api/scan?library={{ lib.name }}">
+          <button type="button" onclick="rescanLibrary('{{ lib.name }}')">Rescan</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<script>
+async function rescanLibrary(name) {
+  const r = await fetch('/api/scan?library=' + encodeURIComponent(name), {method: 'POST'});
+  const data = await r.json();
+  alert('Scanned ' + name + ': ' + JSON.stringify(data));
+}
+</script>
+{% endblock %}

@@ -1,0 +1,26 @@
+services:
+  media-insights:
+    build: .
+    image: ghcr.io/wokano1/media-insights:latest
+    container_name: media-insights
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      # Persistent config + database
+      - ./config:/config
+      # Your media library goes here. Mount as many roots as you need;
+      # point the scanner at them from config.yaml.
+      - /path/to/movies:/data/movies:ro
+      - /path/to/tv:/data/tv:ro
+      - /path/to/anime:/data/anime:ro
+    environment:
+      MI_LOG_LEVEL: INFO
+      # Watch on network mounts — inotify won't fire there.
+      MI_WATCHER__OBSERVER: polling
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

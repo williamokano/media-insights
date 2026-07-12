@@ -1,0 +1,31 @@
+# Build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local config and data
+config.yaml
+*.db
+*.db-*
+
+# VCS
+.git/
+.gitignore
+.github/
+
+# Docs and tests (not needed in the image)
+tests/
+*.md
+!README.md
+
+# IDE
+.vscode/
+.idea/

@@ -1,0 +1,70 @@
+# media-insights configuration
+# Copy to /config/config.yaml inside the container, or pass --config /path/to.yaml.
+
+config_dir: /config       # where the database lives
+data_dir:   /data         # mount your media under here
+log_level:  INFO
+
+database:
+  # SQLite is the default. Swap to PostgreSQL when needed:
+  # url: postgresql+psycopg://user:pass@host/media_insights
+  url: sqlite:///{config_dir}/media_insights.db
+
+# Fingerprinting strategy. Cheaper strategies run faster on big libraries.
+# mtime   - cheapest, can miss same-size rewrites
+# partial - BLAKE2b over first/last 8 MiB + size (recommended for most users)
+# full    - bit-exact, very slow on multi-GB remuxes
+fingerprint:
+  strategy: partial
+  chunk_bytes: 8388608   # 8 MiB head/tail
+
+# Filesystem watcher. Use polling on network mounts (NFS/SMB) where inotify
+# is unavailable.
+watcher:
+  enabled: true
+  recursive: true
+  observer: auto          # auto | inotify | polling
+  debounce_seconds: 5     # coalesce bursts
+
+# Periodic deep scan, even with watcher on (belt + braces).
+schedule:
+  enabled: true
+  cron: "0 */6 * * *"     # every 6 hours; off the :00 mark
+
+# Libraries to scan. A library is one folder, one hint.
+# Hint shapes the matcher and seeds the classifier.
+# kind: movie | tv | anime | auto
+libraries:
+  - name: Movies
+    path: /data/movies
+    kind: movie
+  - name: TV
+    path: /data/tv
+    kind: tv
+  - name: Anime
+    path: /data/anime
+    kind: anime
+
+# Webhook delivery. Sign payloads with HMAC-SHA256 so receivers can verify.
+webhooks:
+  - name: default
+    url: ""               # empty disables delivery; set to e.g. http://hooks:9000/event
+    secret: ""            # shared HMAC secret; empty -> no signature
+    timeout_seconds: 10
+    max_attempts: 8
+
+# Arbitrary local hooks. The outbox writes {old, new} JSON to the script's stdin.
+exec_hooks:
+  - name: log-changes
+    command: ""
+    timeout_seconds: 30
+
+# Server bind for the REST API + Web UI.
+server:
+  host: 0.0.0.0
+  port: 8765
+
+# ffmpeg/ffprobe location. Leave empty for PATH lookup.
+ffmpeg:
+  ffprobe: ""
+  mediainfo_cli: ""       # optional; if absent, only ffprobe is used
