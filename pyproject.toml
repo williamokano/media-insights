@@ -24,6 +24,7 @@ dependencies = [
   "alembic>=1.14",
   "pydantic>=2.9",
   "pyyaml>=6.0",
+  "ruamel.yaml>=0.18",
   "watchdog>=6.0",
   "apscheduler>=3.10",
   "guessit>=3.5",

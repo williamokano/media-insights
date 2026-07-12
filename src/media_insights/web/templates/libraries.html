@@ -2,25 +2,126 @@
 {% block title %}Libraries &middot; media-insights{% endblock %}
 {% block content %}
 <h1>Libraries</h1>
+
+<section class="panel">
+  <h2>Add library</h2>
+  <form id="add-form" onsubmit="createLibrary(event)">
+    <input name="name" placeholder="Name" required>
+    <input name="path" placeholder="/data/movies" required>
+    <select name="kind">
+      <option value="auto">auto</option>
+      <option value="movie">movie</option>
+      <option value="tv">tv</option>
+      <option value="anime">anime</option>
+    </select>
+    <button type="submit">Add</button>
+  </form>
+  <p class="empty" id="add-error"></p>
+</section>
+
 <table>
-  <thead><tr><th>Name</th><th>Path</th><th>Kind</th><th>Titles</th><th>Action</th></tr></thead>
+  <thead>
+    <tr><th>Name</th><th>Path</th><th>Kind</th><th>Items</th><th>Configured</th><th>Actions</th></tr>
+  </thead>
   <tbody>
     {% for lib in libraries %}
-    <tr>
-      <td>{{ lib.name }}</td>
-      <td><code>{{ lib.path }}</code></td>
-      <td>{{ lib.kind }}</td>
+    <tr data-id="{{ lib.id }}">
+      <td class="f-name">{{ lib.name }}</td>
+      <td class="f-path"><code>{{ lib.path }}</code></td>
+      <td class="f-kind">{{ lib.kind }}</td>
       <td>{{ lib.items|length }}</td>
       <td>
-        <form method="post" action="/api/scan?library={{ lib.name }}">
-          <button type="button" onclick="rescanLibrary('{{ lib.name }}')">Rescan</button>
-        </form>
+        {% if lib.name in configured_names %}
+          <span class="badge-on">yes</span>
+        {% else %}
+          <span class="badge-off">no</span>
+        {% endif %}
+      </td>
+      <td class="actions">
+        <button type="button" onclick="rescanLibrary('{{ lib.name }}')">Rescan</button>
+        <button type="button" class="secondary" onclick="startEdit({{ lib.id }})">Edit</button>
+        <button type="button" class="secondary" onclick="removeLibrary({{ lib.id }}, '{{ lib.name }}', false)">Remove</button>
+        <button type="button" class="danger" onclick="removeLibrary({{ lib.id }}, '{{ lib.name }}', true)">Remove &amp; delete data</button>
       </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+{% if not libraries %}<p class="empty">No libraries yet. Add one above.</p>{% endif %}
+
 <script>
+async function createLibrary(ev) {
+  ev.preventDefault();
+  const fd = new FormData(ev.target);
+  const body = Object.fromEntries(fd.entries());
+  const errorEl = document.getElementById('add-error');
+  errorEl.textContent = '';
+  const r = await fetch('/api/libraries', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    errorEl.textContent = data.detail || ('failed to add library (HTTP ' + r.status + ')');
+    return;
+  }
+  location.reload();
+}
+
+function startEdit(id) {
+  const row = document.querySelector('tr[data-id="' + id + '"]');
+  const name = row.querySelector('.f-name').textContent.trim();
+  const path = row.querySelector('.f-path code').textContent.trim();
+  const kind = row.querySelector('.f-kind').textContent.trim();
+  const kinds = ['auto', 'movie', 'tv', 'anime'];
+  const options = kinds.map(function (k) {
+    return '<option value="' + k + '"' + (k === kind ? ' selected' : '') + '>' + k + '</option>';
+  }).join('');
+  row.innerHTML =
+    '<td colspan="6">' +
+    '<form onsubmit="saveEdit(event, ' + id + ')">' +
+    '<input name="name" value="' + name + '" required>' +
+    '<input name="path" value="' + path + '" required>' +
+    '<select name="kind">' + options + '</select>' +
+    '<button type="submit">Save</button>' +
+    '<button type="button" class="secondary" onclick="location.reload()">Cancel</button>' +
+    '<span class="empty edit-error"></span>' +
+    '</form>' +
+    '</td>';
+}
+
+async function saveEdit(ev, id) {
+  ev.preventDefault();
+  const fd = new FormData(ev.target);
+  const body = Object.fromEntries(fd.entries());
+  const r = await fetch('/api/libraries/' + id, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    ev.target.querySelector('.edit-error').textContent = data.detail || 'failed to update library';
+    return;
+  }
+  location.reload();
+}
+
+async function removeLibrary(id, name, purge) {
+  const msg = purge
+    ? 'Permanently delete "' + name + '" and ALL its indexed data? This cannot be undone.'
+    : 'Stop scanning and watching "' + name + '"? Already-indexed data is kept and stays browsable.';
+  if (!confirm(msg)) return;
+  const url = '/api/libraries/' + id + (purge ? '?purge=true' : '');
+  const r = await fetch(url, {method: 'DELETE'});
+  if (!r.ok && r.status !== 204) {
+    alert('failed to remove library (HTTP ' + r.status + ')');
+    return;
+  }
+  location.reload();
+}
+
 async function rescanLibrary(name) {
   const r = await fetch('/api/scan?library=' + encodeURIComponent(name), {method: 'POST'});
   const data = await r.json();

@@ -38,7 +38,13 @@ from media_insights.probe import probe as probe_file
 log = logging.getLogger(__name__)
 
 
-def _library_record(session: Session, lib: LibraryConfig) -> Library:
+def get_or_create_library(session: Session, lib: LibraryConfig) -> Library:
+    """Find the DB row for a configured library, creating/updating it as needed.
+
+    Public so the API's library-management endpoints can eagerly create a
+    row on POST (making a freshly-added library visible immediately, before
+    its first scan finishes) instead of waiting for scan_library() to do it.
+    """
     row = session.query(Library).filter(Library.name == lib.name).one_or_none()
     if row is None:
         row = Library(name=lib.name, path=lib.path, kind=lib.kind)
@@ -245,7 +251,7 @@ def scan_library(cfg: AppConfig, lib: LibraryConfig, *, force: bool = False) -> 
         "started_at": started.isoformat(),
     }
     with session_scope() as session:
-        library = _library_record(session, lib)
+        library = get_or_create_library(session, lib)
         for found in iter_video_files(lib.path, recursive=True):
             summary["files_seen"] += 1
             try:
@@ -463,7 +469,7 @@ def manual_rescan_path(cfg: AppConfig, path: str) -> str:
         raise ValueError(f"{path} is not under any configured library")
 
     with session_scope() as session:
-        library = _library_record(session, owning)
+        library = get_or_create_library(session, owning)
         found = FoundFile(
             path=target,
             parent=target.parent,

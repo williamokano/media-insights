@@ -4,16 +4,24 @@ from __future__ import annotations
 
 from typing import Any
 
+from media_insights.config import AppConfig
 from media_insights.models import Library, MediaFile, MediaItem, Track
 
 
-def serialise_library(row: Library) -> dict[str, Any]:
+def serialise_library(row: Library, cfg: AppConfig | None = None) -> dict[str, Any]:
+    configured = True
+    if cfg is not None:
+        configured = any(lib.name == row.name for lib in cfg.libraries)
     return {
         "id": row.id,
         "name": row.name,
         "path": row.path,
         "kind": row.kind,
         "items": len(row.items),
+        # False means this library was removed from config.yaml but its
+        # indexed data was kept (soft delete) -- it's browsable but no
+        # longer scanned or watched.
+        "configured": configured,
     }
 
 

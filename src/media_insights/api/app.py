@@ -3,24 +3,28 @@
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from media_insights import config_store
 from media_insights.api.serializers import serialise_file, serialise_item, serialise_library
-from media_insights.config import AppConfig
-from media_insights.db import ensure_schema, get_session, init_engine
+from media_insights.config import AppConfig, LibraryConfig, resolve_config_path
+from media_insights.db import ensure_schema, get_session, init_engine, session_scope
 from media_insights.events import Dispatcher
 from media_insights.models import Library, MediaFile, MediaItem
 from media_insights.scanner import (
     MediaWatcher,
     ScanScheduler,
+    get_or_create_library,
     manual_rescan_path,
     scan_all,
     scan_library,
@@ -44,7 +48,8 @@ class ClassifyOverride(BaseModel):
 
 
 class State:
-    config: AppConfig
+    config: AppConfig | None = None
+    config_path: Path | None = None
     dispatcher: Dispatcher | None = None
     watcher: MediaWatcher | None = None
     scheduler: ScanScheduler | None = None
@@ -57,9 +62,10 @@ def _db_url(cfg: AppConfig) -> str:
     return cfg.database.url or f"sqlite:///{cfg.config_dir}/media_insights.db"
 
 
-def configure(cfg: AppConfig) -> None:
+def configure(cfg: AppConfig, config_path: str | Path | None = None) -> None:
     """Wire config + DB + background services. Called once on startup."""
     state.config = cfg
+    state.config_path = resolve_config_path(config_path)
     init_engine(_db_url(cfg))
     ensure_schema()
 
@@ -96,8 +102,6 @@ async def lifespan(app: FastAPI):
 
 def _debounced_rescan(cfg: AppConfig, path) -> None:
     """Watcher callback: rescan changed video files, prune deleted ones."""
-    from pathlib import Path
-
     from media_insights.discovery.extensions import VIDEO_EXTS
     from media_insights.scanner import handle_missing_path
 
@@ -168,6 +172,36 @@ def _identity_snapshot(item: MediaItem) -> dict:
     }
 
 
+def _require_config() -> AppConfig:
+    cfg = state.config
+    if cfg is None:
+        raise HTTPException(503, "not configured")
+    return cfg
+
+
+def _require_config_path() -> Path:
+    if state.config_path is None:
+        raise HTTPException(503, "not configured")
+    return state.config_path
+
+
+def _require_existing_dir(path: str) -> None:
+    if not Path(path).is_dir():
+        raise HTTPException(
+            400,
+            f"path does not exist or is not a directory: {path} "
+            "(mount it into the container, then retry)",
+        )
+
+
+def _background_scan(cfg: AppConfig, lib: LibraryConfig) -> None:
+    """Fire-and-forget initial scan so a newly added library fills in without
+    the caller having to wait on a potentially large directory tree."""
+    threading.Thread(
+        target=scan_library, args=(cfg, lib), kwargs={"force": False}, daemon=True
+    ).start()
+
+
 def create_app() -> FastAPI:
     from media_insights import __version__
 
@@ -181,7 +215,84 @@ def create_app() -> FastAPI:
     @app.get("/api/libraries")
     def list_libraries(session: Session = Depends(get_session)) -> dict:
         rows = session.query(Library).order_by(Library.name).all()
-        return {"libraries": [serialise_library(r) for r in rows]}
+        return {"libraries": [serialise_library(r, state.config) for r in rows]}
+
+    @app.post("/api/libraries", status_code=201)
+    def create_library(body: LibraryConfig) -> dict:
+        cfg = _require_config()
+        config_path = _require_config_path()
+        _require_existing_dir(body.path)
+        try:
+            config_store.add_library(cfg, config_path, body)
+        except config_store.LibraryExistsError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except config_store.ConfigFileError as exc:
+            raise HTTPException(500, str(exc)) from exc
+        with session_scope() as session:
+            row = get_or_create_library(session, body)
+            result = serialise_library(row, cfg)
+        if state.watcher:
+            state.watcher.install_library(body.path)
+        _background_scan(cfg, body)
+        return result
+
+    @app.put("/api/libraries/{library_id}")
+    def update_library(library_id: int, body: LibraryConfig, session: Session = Depends(get_session)) -> dict:
+        cfg = _require_config()
+        config_path = _require_config_path()
+        _require_existing_dir(body.path)
+        row = session.get(Library, library_id)
+        if row is None:
+            raise HTTPException(404, "library not found")
+        old_name, old_path = row.name, row.path
+        try:
+            config_store.update_library(cfg, config_path, old_name, body)
+        except config_store.LibraryNotFoundError:
+            # DB row exists but config.yaml no longer has this name (e.g. it
+            # was hand-edited); add it fresh rather than fail the request.
+            try:
+                config_store.add_library(cfg, config_path, body)
+            except config_store.LibraryExistsError as exc:
+                raise HTTPException(409, str(exc)) from exc
+        except config_store.LibraryExistsError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except config_store.ConfigFileError as exc:
+            raise HTTPException(500, str(exc)) from exc
+        row.name = body.name
+        row.path = body.path
+        row.kind = body.kind
+        result = serialise_library(row, cfg)
+        session.commit()
+        path_changed = old_path != body.path
+        if state.watcher and path_changed:
+            state.watcher.uninstall_library(old_path)
+            state.watcher.install_library(body.path)
+        if path_changed:
+            _background_scan(cfg, body)
+        return result
+
+    @app.delete("/api/libraries/{library_id}", status_code=204)
+    def delete_library(
+        library_id: int, purge: bool = False, session: Session = Depends(get_session)
+    ) -> Response:
+        cfg = _require_config()
+        config_path = _require_config_path()
+        row = session.get(Library, library_id)
+        if row is None:
+            raise HTTPException(404, "library not found")
+        name, path = row.name, row.path
+        if purge:
+            session.delete(row)
+            session.commit()
+        try:
+            config_store.remove_library(cfg, config_path, name)
+        except config_store.LibraryNotFoundError:
+            pass  # already absent from config; nothing to persist
+        except config_store.ConfigFileError as exc:
+            raise HTTPException(500, str(exc)) from exc
+        if state.watcher:
+            state.watcher.uninstall_library(path)
+        return Response(status_code=204)
 
     @app.get("/api/items")
     def list_items(
@@ -294,9 +405,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/scan")
     def trigger_scan(library: str | None = None) -> dict:
-        cfg = state.config
-        if cfg is None:
-            raise HTTPException(503, "not configured")
+        cfg = _require_config()
         if library:
             for lib in cfg.libraries:
                 if lib.name == library:
@@ -330,15 +439,11 @@ def create_app() -> FastAPI:
     return app
 
 
-def _static_dir():
-    from pathlib import Path
-
+def _static_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "web" / "static"
 
 
-def _templates_dir():
-    from pathlib import Path
-
+def _templates_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "web" / "templates"
 
 

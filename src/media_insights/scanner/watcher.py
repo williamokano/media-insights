@@ -30,7 +30,7 @@ from watchdog.observers.polling import PollingObserver
 from media_insights.config import AppConfig, WatcherConfig
 
 if TYPE_CHECKING:
-    from watchdog.observers.api import BaseObserver
+    from watchdog.observers.api import BaseObserver, ObservedWatch
 
 log = logging.getLogger(__name__)
 
@@ -92,7 +92,9 @@ class MediaWatcher:
         self._on_path_changed = on_path_changed
         self._observer: BaseObserver = self._build_observer(cfg.watcher)
         self._handlers: dict[str, _DebouncedHandler] = {}
+        self._watches: dict[str, ObservedWatch] = {}
         self._installed: set[str] = set()
+        self._started = False
 
     @staticmethod
     def _build_observer(cfg: WatcherConfig) -> BaseObserver:
@@ -114,6 +116,7 @@ class MediaWatcher:
             log.warning("inotify observer failed (%s); falling back to polling", exc)
             self._observer = PollingObserver(timeout=self._cfg.watcher.debounce_seconds)
             self._observer.start()  # type: ignore[assignment]
+        self._started = True
         for lib in self._cfg.libraries:
             self._install(lib.path)
         log.info("watcher started, observing %d path(s)", len(self._installed))
@@ -127,18 +130,48 @@ class MediaWatcher:
         except RuntimeError:
             # observer never started (e.g. disabled in config)
             pass
+        self._started = False
         log.info("watcher stopped")
 
-    def _install(self, path: str) -> None:
-        from pathlib import Path
+    def install_library(self, path: str) -> None:
+        """Start watching a path added after startup. No-op if already watched."""
+        if not self._started:
+            log.debug("install_library(%s) skipped: watcher not started", path)
+            return
+        p = str(Path(path))
+        if p in self._installed:
+            return
+        self._install(p)
+        if p in self._installed:
+            log.info("now watching %s", p)
 
+    def uninstall_library(self, path: str) -> None:
+        """Stop watching a path removed after startup. No-op if not watched."""
+        p = str(Path(path))
+        handler = self._handlers.pop(p, None)
+        if handler:
+            handler.stop()
+        watch = self._watches.pop(p, None)
+        if watch is not None:
+            try:
+                self._observer.unschedule(watch)
+            except Exception as exc:
+                log.debug("unschedule(%s) failed (already gone?): %s", p, exc)
+        if p in self._installed:
+            self._installed.discard(p)
+            log.info("stopped watching %s", p)
+
+    def _install(self, path: str) -> None:
         p = Path(path)
         if not p.exists():
             log.warning("skip watch: %s does not exist", p)
             return
         handler = _DebouncedHandler(self._cfg.watcher.debounce_seconds, self._on_path_changed)
         self._handlers[str(p)] = handler
-        self._observer.schedule(_WatchdogBridge(handler), str(p), recursive=self._cfg.watcher.recursive)  # type: ignore[arg-type]
+        watch = self._observer.schedule(
+            _WatchdogBridge(handler), str(p), recursive=self._cfg.watcher.recursive  # type: ignore[arg-type]
+        )
+        self._watches[str(p)] = watch
         self._installed.add(str(p))
 
 

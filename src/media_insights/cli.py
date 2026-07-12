@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 
 import typer
 
 from media_insights.api import configure, create_app
-from media_insights.config import AppConfig, load_config
+from media_insights.config import AppConfig, load_config, resolve_config_path
 from media_insights.db import session_scope
 from media_insights.models import MediaItem
 from media_insights.scanner import manual_rescan_path, scan_all, scan_library
 
 app = typer.Typer(add_completion=False)
-app_state: dict[str, AppConfig | None] = {"cfg": None}
+
+_cfg: AppConfig | None = None
+_path: Path | None = None
 
 log = logging.getLogger("media_insights")
 
@@ -27,9 +30,16 @@ def _setup_logging(level: str) -> None:
 
 
 def _load_cfg(config: str | None) -> AppConfig:
-    if app_state["cfg"] is None or config:
-        app_state["cfg"] = load_config(config)
-    return app_state["cfg"]  # type: ignore[return-value]
+    global _cfg, _path
+    if _cfg is None or config:
+        _path = resolve_config_path(config)
+        _cfg = load_config(_path)
+    return _cfg
+
+
+def _config_path() -> Path:
+    assert _path is not None  # set by _load_cfg, always called first
+    return _path
 
 
 @app.callback()
@@ -74,7 +84,7 @@ def cmd_serve(
     import uvicorn
 
     cfg = _load_cfg(None)
-    configure(cfg)
+    configure(cfg, _config_path())
     bind_host = host or cfg.server.host
     bind_port = port or cfg.server.port
     api_app = create_app()
@@ -85,7 +95,7 @@ def cmd_serve(
 def cmd_search(query: str) -> None:
     """Search titles and file paths."""
     cfg = _load_cfg(None)
-    configure(cfg)
+    configure(cfg, _config_path())
     with session_scope() as session:
         like = f"%{query}%"
         items = session.query(MediaItem).filter(MediaItem.title.ilike(like)).limit(50).all()
@@ -99,7 +109,7 @@ def cmd_search(query: str) -> None:
 def cmd_unmatched() -> None:
     """List items still waiting for manual identification."""
     cfg = _load_cfg(None)
-    configure(cfg)
+    configure(cfg, _config_path())
     with session_scope() as session:
         rows = (
             session.query(MediaItem)
@@ -128,7 +138,7 @@ def cmd_resolve(
     from media_insights.models import ChangeEvent
 
     cfg = _load_cfg(None)
-    configure(cfg)
+    configure(cfg, _config_path())
     with session_scope() as session:
         item = session.get(MediaItem, item_id)
         if not item:
@@ -172,7 +182,7 @@ def cmd_resolve(
 def cmd_rescan(path: str) -> None:
     """Force-rescan a single path."""
     cfg = _load_cfg(None)
-    configure(cfg)
+    configure(cfg, _config_path())
     outcome = manual_rescan_path(cfg, path)
     typer.echo(outcome)
 

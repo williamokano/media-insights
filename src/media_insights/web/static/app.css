@@ -77,7 +77,16 @@ input, select, button {
 }
 button { cursor: pointer; background: var(--accent); color: #fff; border: none; }
 button:hover { background: #1f6feb; }
-form { display: flex; gap: 8px; flex-wrap: wrap; }
+button.danger { background: var(--err); }
+button.danger:hover { background: #c0392b; }
+button.secondary { background: var(--border); color: var(--text); }
+button.secondary:hover { background: #3a4048; }
+form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+.badge-on { background: var(--ok); color: #000; padding: 1px 6px; border-radius: 3px; font-size: 12px; }
+.badge-off { background: var(--border); color: var(--muted); padding: 1px 6px; border-radius: 3px; font-size: 12px; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.actions button { padding: 4px 8px; font-size: 12px; }
 
 .hdr { color: var(--ok); font-weight: 700; margin-left: 4px; }
 .conf { color: var(--muted); margin-left: 6px; }

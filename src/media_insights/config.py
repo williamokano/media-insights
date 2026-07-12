@@ -140,9 +140,18 @@ def _expand_placeholders(raw: dict[str, Any], config_dir: str, data_dir: str) ->
     return walk(raw)
 
 
+def resolve_config_path(path: str | os.PathLike[str] | None = None) -> Path:
+    """Resolve the config.yaml path: explicit arg > MI_CONFIG env > default.
+
+    Shared with config_store so the file that gets edited from the API/UI is
+    always the same one load_config() would read.
+    """
+    return Path(path or os.environ.get("MI_CONFIG") or "/config/config.yaml")
+
+
 def load_config(path: str | os.PathLike[str] | None = None) -> AppConfig:
     """Load config: defaults, then YAML file, then env (MI_*)."""
-    config_path = Path(path or os.environ.get("MI_CONFIG") or "/config/config.yaml")
+    config_path = resolve_config_path(path)
     raw: dict[str, Any] = {}
     if config_path.is_file():
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}

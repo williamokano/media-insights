@@ -46,9 +46,14 @@ def mount_web(app: FastAPI, templates: Jinja2Templates | None) -> None:
         request: Request,
         session: Session = Depends(get_session),
     ):
+        # Lazy import: media_insights.api.app imports mount_web from this
+        # module, so importing state at module scope would be circular.
+        from media_insights.api.app import state
+
         rows = session.query(Library).order_by(Library.name).all()
+        configured_names = {lib.name for lib in (state.config.libraries if state.config else [])}
         return templates.TemplateResponse(
-            request, "libraries.html", {"libraries": rows}
+            request, "libraries.html", {"libraries": rows, "configured_names": configured_names}
         )
 
     @app.get("/items/{item_id}", response_class=HTMLResponse)

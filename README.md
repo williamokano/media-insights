@@ -6,6 +6,7 @@ Designed for an `*-arr`-style Docker deployment: one `/config` volume for state,
 
 ## Features
 
+- **Manage libraries from the UI or API — no restart needed.** Add, rename, or remove libraries from `/libraries` or `POST/PUT/DELETE /api/libraries`; changes write straight back into `config.yaml` (comments preserved) and the filesystem watcher picks up the new path immediately.
 - **Offline-first matching.** `.plexmatch` + folder-name parsing via [guessit] cover most real-world releases with no API keys. Pluggable `Provider` interface for TMDB/TVDB/AniList later.
 - **Technical truth, normalized.** Every track (video / audio / subtitle, embedded or external sidecar) is its own row — so queries like *"files with no English subtitle"* or *"anything still x264"* are SQL, not file scanning. Episode numbers and titles are extracted per file.
 - **Scored classification.** Anime / TV / movie labels come with confidence and a human-readable list of reasons. Manual overrides always win.
@@ -130,6 +131,8 @@ libraries:
   - name: Anime
     path: /data/anime
     kind: anime
+# This list is also editable at runtime -- see "Managing libraries" below.
+# Edits made from the UI/API are written back here automatically.
 
 webhooks:
   - name: default
@@ -157,6 +160,34 @@ Override anything from the environment with `MI_`-prefixed env vars, using
 `MI_WATCHER__OBSERVER=polling`, `MI_SERVER__PORT=9000`. List-valued fields
 (`libraries`, `webhooks`, `exec_hooks`) can only be set in the YAML file.
 
+## Managing libraries
+
+Editing `libraries:` in `config.yaml` and restarting works, but you don't
+have to — the `/libraries` page (and the equivalent REST endpoints) let you
+add, rename, or remove libraries while the service keeps running:
+
+- **Add**: validates the path exists inside the container (mount it first),
+  writes the entry back into `config.yaml`, starts a background scan, and
+  turns on the watcher for that path immediately.
+- **Edit**: renaming or repointing a library updates both the database and
+  `config.yaml`; if the path changed, the watcher is moved to the new path
+  and a rescan is kicked off.
+- **Remove** has two distinct actions, since undoing an accidental delete of
+  years of indexed metadata isn't something a confirm dialog can fix:
+  - *Remove* — stops scanning/watching the library but keeps everything
+    already indexed; it stays browsable, just marked `configured: false`.
+  - *Remove & delete data* (`?purge=true`) — also deletes the library's
+    `MediaItem`/`MediaFile`/`Track` rows. This is permanent.
+
+All three operations use a comment-preserving YAML writer, so hand-written
+comments elsewhere in `config.yaml` survive edits made from the UI.
+
+Libraries defined directly in `config.yaml` before the service starts don't
+get a database row until their first scan completes (`GET /api/libraries`
+reflects the database, not the config file) — this only affects the very
+first scan after adding a library by hand; libraries added through the UI/API
+appear immediately.
+
 ## CLI
 
 ```bash
@@ -178,7 +209,10 @@ media-insights version
 | Method | Path | Purpose |
 |---|---|---|
 | GET    | `/healthz` | liveness |
-| GET    | `/api/libraries` | list libraries |
+| GET    | `/api/libraries` | list libraries (`configured: false` = removed from config but data kept) |
+| POST   | `/api/libraries` | add a library — body `{"name", "path", "kind"}`; `path` must exist |
+| PUT    | `/api/libraries/{id}` | rename / repoint a library |
+| DELETE | `/api/libraries/{id}` | stop scanning/watching (data kept); add `?purge=true` to also delete its indexed data |
 | GET    | `/api/items` | filter by library / classification / unmatched; paginate |
 | GET    | `/api/items/{id}` | full item incl. files + tracks |
 | POST   | `/api/items/{id}/identify` | attach `imdb_id` / `tmdb_id` / `tvdb_id` / `anidb_id` / `guid` / `classification` |
@@ -309,6 +343,7 @@ as a safety net for fresh installs.
 ```
 src/media_insights/
   config.py            pydantic models; YAML + nested MI_* env overrides
+  config_store.py      comment-preserving library CRUD writes to config.yaml
   db.py, models.py     SQLAlchemy 2.0 typed ORM, WAL pragmas
   probe/               ffprobe + pymediainfo + normalize
   discovery/           walker, fingerprint, plexmatch, subtitles, grouping
