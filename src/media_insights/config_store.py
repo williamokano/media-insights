@@ -13,7 +13,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from ruamel.yaml import YAML
+from ruamel.yaml import YAML, YAMLError
+from ruamel.yaml.comments import CommentedMap
 
 from media_insights.config import AppConfig, LibraryConfig
 
@@ -28,7 +29,7 @@ _lock = threading.Lock()
 
 
 class ConfigFileError(RuntimeError):
-    """config.yaml can't be found or parsed on disk."""
+    """config.yaml exists but couldn't be parsed as YAML."""
 
 
 class LibraryExistsError(ValueError):
@@ -40,19 +41,25 @@ class LibraryNotFoundError(KeyError):
 
 
 def _load_document(path: Path) -> Any:
-    if not path.is_file():
-        raise ConfigFileError(
-            f"no config file at {path}; create one (see config.example.yaml) "
-            "before managing libraries through the API or Web UI"
-        )
-    with path.open("r", encoding="utf-8") as fh:
-        doc = _yaml.load(fh)
-    if doc is None:
-        raise ConfigFileError(f"{path} is empty")
-    return doc
+    """Load config.yaml, or start a fresh document if it's missing/empty.
+
+    We only ever write the `libraries:` key back in (see _persist_libraries),
+    so starting from an empty document is safe -- it can't clobber other
+    settings, which keep coming from env vars/defaults exactly as before.
+    """
+    if path.is_file():
+        with path.open("r", encoding="utf-8") as fh:
+            try:
+                doc = _yaml.load(fh)
+            except YAMLError as exc:
+                raise ConfigFileError(f"{path} is not valid YAML: {exc}") from exc
+        if doc is not None:
+            return doc
+    return CommentedMap()
 
 
 def _write_document(path: Path, doc: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     with tmp.open("w", encoding="utf-8") as fh:
         _yaml.dump(doc, fh)

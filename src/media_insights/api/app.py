@@ -197,9 +197,14 @@ def _require_existing_dir(path: str) -> None:
 def _background_scan(cfg: AppConfig, lib: LibraryConfig) -> None:
     """Fire-and-forget initial scan so a newly added library fills in without
     the caller having to wait on a potentially large directory tree."""
-    threading.Thread(
-        target=scan_library, args=(cfg, lib), kwargs={"force": False}, daemon=True
-    ).start()
+
+    def run() -> None:
+        try:
+            scan_library(cfg, lib, force=False)
+        except Exception:
+            log.exception("background scan of %s failed", lib.name)
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 def create_app() -> FastAPI:

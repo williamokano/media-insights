@@ -180,7 +180,10 @@ add, rename, or remove libraries while the service keeps running:
     `MediaItem`/`MediaFile`/`Track` rows. This is permanent.
 
 All three operations use a comment-preserving YAML writer, so hand-written
-comments elsewhere in `config.yaml` survive edits made from the UI.
+comments elsewhere in `config.yaml` survive edits made from the UI. If
+`config.yaml` doesn't exist yet (or is empty), adding a library through the
+UI/API creates it — you don't need to `cp config.example.yaml` first just to
+use the library manager.
 
 Libraries defined directly in `config.yaml` before the service starts don't
 get a database row until their first scan completes (`GET /api/libraries`

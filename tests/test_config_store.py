@@ -94,16 +94,32 @@ def test_remove_library_missing_raises(config_file: Path, cfg: AppConfig) -> Non
         remove_library(cfg, config_file, "Ghost")
 
 
-def test_missing_config_file_raises_and_does_not_mutate(tmp_path: Path, cfg: AppConfig) -> None:
+def test_missing_config_file_is_created(tmp_path: Path, cfg: AppConfig) -> None:
     missing = tmp_path / "does-not-exist.yaml"
-    with pytest.raises(ConfigFileError):
-        add_library(cfg, missing, LibraryConfig(name="X", path="/x", kind="auto"))
-    # rollback: in-memory list must not carry the entry the write couldn't persist
-    assert [lib.name for lib in cfg.libraries] == ["Movies"]
+    add_library(cfg, missing, LibraryConfig(name="X", path="/x", kind="auto"))
+    assert [lib.name for lib in cfg.libraries] == ["Movies", "X"]
+    text = missing.read_text(encoding="utf-8")
+    assert "name: X" in text
 
 
-def test_empty_config_file_raises(tmp_path: Path, cfg: AppConfig) -> None:
+def test_missing_config_file_creates_parent_dirs(tmp_path: Path, cfg: AppConfig) -> None:
+    missing = tmp_path / "nested" / "dir" / "config.yaml"
+    add_library(cfg, missing, LibraryConfig(name="X", path="/x", kind="auto"))
+    assert missing.is_file()
+
+
+def test_empty_config_file_is_populated(tmp_path: Path, cfg: AppConfig) -> None:
     empty = tmp_path / "empty.yaml"
     empty.write_text("", encoding="utf-8")
+    add_library(cfg, empty, LibraryConfig(name="X", path="/x", kind="auto"))
+    text = empty.read_text(encoding="utf-8")
+    assert "name: X" in text
+
+
+def test_invalid_yaml_raises_and_does_not_mutate(tmp_path: Path, cfg: AppConfig) -> None:
+    broken = tmp_path / "broken.yaml"
+    broken.write_text("libraries: [\n  not: valid: yaml: at: all", encoding="utf-8")
     with pytest.raises(ConfigFileError):
-        add_library(cfg, empty, LibraryConfig(name="X", path="/x", kind="auto"))
+        add_library(cfg, broken, LibraryConfig(name="X", path="/x", kind="auto"))
+    # rollback: in-memory list must not carry the entry the write couldn't persist
+    assert [lib.name for lib in cfg.libraries] == ["Movies"]

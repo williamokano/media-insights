@@ -78,6 +78,59 @@ def test_create_library_duplicate_name_conflicts() -> None:
     assert r.status_code == 409
 
 
+def test_create_library_when_config_file_does_not_exist_yet() -> None:
+    """Fresh install repro: no config.yaml on disk at all before the first add."""
+    tmpdir = Path(tempfile.mkdtemp(prefix="mi-api-lib-nofile-"))
+    movies_dir = tmpdir / "data" / "movies"
+    movies_dir.mkdir(parents=True)
+    config_path = tmpdir / "config.yaml"
+    assert not config_path.exists()
+
+    db_url = f"sqlite:///{tmpdir}/test.db"
+    cfg = AppConfig(
+        config_dir=str(tmpdir),
+        watcher=WatcherConfig(enabled=False),
+        schedule=ScheduleConfig(enabled=False),
+        database=DatabaseConfig(url=db_url),
+        libraries=[],
+    )
+    init_engine(db_url)
+    ensure_schema()
+    configure(cfg, config_path)
+    client = TestClient(create_app())
+
+    r = client.post("/api/libraries", json={"name": "Movies", "path": str(movies_dir), "kind": "movie"})
+    assert r.status_code == 201
+    assert config_path.is_file()
+    assert "name: Movies" in config_path.read_text(encoding="utf-8")
+
+
+def test_create_library_when_config_file_is_empty() -> None:
+    """Same repro, but with an empty file already sitting there."""
+    tmpdir = Path(tempfile.mkdtemp(prefix="mi-api-lib-empty-"))
+    movies_dir = tmpdir / "data" / "movies"
+    movies_dir.mkdir(parents=True)
+    config_path = tmpdir / "config.yaml"
+    config_path.touch()
+
+    db_url = f"sqlite:///{tmpdir}/test.db"
+    cfg = AppConfig(
+        config_dir=str(tmpdir),
+        watcher=WatcherConfig(enabled=False),
+        schedule=ScheduleConfig(enabled=False),
+        database=DatabaseConfig(url=db_url),
+        libraries=[],
+    )
+    init_engine(db_url)
+    ensure_schema()
+    configure(cfg, config_path)
+    client = TestClient(create_app())
+
+    r = client.post("/api/libraries", json={"name": "Movies", "path": str(movies_dir), "kind": "movie"})
+    assert r.status_code == 201
+    assert "name: Movies" in config_path.read_text(encoding="utf-8")
+
+
 def test_create_library_missing_path_rejected() -> None:
     client, _, _, _ = _setup_app()
     r = client.post("/api/libraries", json={"name": "Ghost", "path": "/no/such/dir", "kind": "auto"})
