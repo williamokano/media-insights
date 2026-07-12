@@ -27,12 +27,6 @@ def available() -> bool:
     return MediaInfo is not None
 
 
-def _strip_prefix(value: str | None, prefix: str) -> str | None:
-    if not value:
-        return value
-    return value[len(prefix):] if value.startswith(prefix) else value
-
-
 def enrich(result: ProbeResult, path: str | Path) -> ProbeResult:
     if not available():
         return result

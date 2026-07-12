@@ -1,7 +1,7 @@
 services:
   media-insights:
     build: .
-    image: ghcr.io/wokano1/media-insights:latest
+    image: ghcr.io/williamokano/media-insights:latest
     container_name: media-insights
     restart: unless-stopped
     ports:
@@ -15,9 +15,12 @@ services:
       - /path/to/tv:/data/tv:ro
       - /path/to/anime:/data/anime:ro
     environment:
+      # Match your host user so /config stays writable (arr-stack convention).
+      PUID: "1000"
+      PGID: "1000"
       MI_LOG_LEVEL: INFO
-      # Watch on network mounts — inotify won't fire there.
-      MI_WATCHER__OBSERVER: polling
+      # Uncomment on network mounts (NFS/SMB) — inotify won't fire there.
+      # MI_WATCHER__OBSERVER: polling
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=3).read()"]
       interval: 30s

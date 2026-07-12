@@ -1,8 +1,8 @@
 """initial schema
 
-Revision ID: 1f992a448750
+Revision ID: d0f4d45356ad
 Revises: 
-Create Date: 2026-07-12 19:02:00.153660
+Create Date: 2026-07-12 21:08:24.349412
 
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '1f992a448750'
+revision: str = 'd0f4d45356ad'
 down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -95,7 +95,7 @@ def upgrade() -> None:
     sa.Column('audio_summary', sa.String(length=255), nullable=True),
     sa.Column('subtitle_summary', sa.String(length=255), nullable=True),
     sa.Column('episode_numbers', sa.JSON(), nullable=True),
-    sa.Column('part', sa.Integer(), nullable=True),
+    sa.Column('episode_title', sa.String(length=1024), nullable=True),
     sa.Column('fingerprint', sa.String(length=128), nullable=True),
     sa.Column('fingerprint_strategy', sa.String(length=16), nullable=True),
     sa.Column('first_seen', sa.DateTime(timezone=True), nullable=False),

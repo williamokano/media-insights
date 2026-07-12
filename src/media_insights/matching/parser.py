@@ -27,6 +27,7 @@ class ParsedTitle:
     anime: bool = False
     is_3d: bool = False
     streaming_service: str | None = None
+    episode_title: str | None = None
 
     @property
     def episode_number(self) -> int | None:
@@ -111,4 +112,13 @@ def parse(name: str) -> ParsedTitle:
         anime=bool(info.get("anime")),
         is_3d=bool(info.get("is_3d")),
         streaming_service=streaming_service,
+        episode_title=_as_str(info.get("episode_title")),
     )
+
+
+def _as_str(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return " ".join(str(v) for v in value)
+    return str(value)

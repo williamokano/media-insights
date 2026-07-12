@@ -29,7 +29,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        ffmpeg ca-certificates tini && \
+        ffmpeg ca-certificates tini gosu && \
     rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -g 1000 media && \
@@ -38,13 +38,15 @@ RUN groupadd -g 1000 media && \
 WORKDIR /app
 COPY --from=builder /install /install
 COPY --from=builder /build/src /app/src
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 VOLUME ["/config", "/data"]
 EXPOSE 8765
 
-USER media
-
-ENTRYPOINT ["/usr/bin/tini", "--"]
+# Runs as root only long enough for entrypoint.sh to remap media to
+# PUID/PGID and drop privileges with gosu (arr-stack convention).
+ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
 CMD ["media-insights", "--config", "/config/config.yaml", "serve", "--host", "0.0.0.0", "--port", "8765"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

@@ -82,3 +82,11 @@ def test_guessit_only_match_is_unresolved() -> None:
 
 def test_parse_plexmatch_handles_missing_file(tmp_path: Path) -> None:
     assert parse_plexmatch(tmp_path / "missing") == PlexMatch()
+
+
+def test_episode_title_extracted() -> None:
+    lib = LibraryConfig(name="TV", path="/x", kind="tv")
+    m = match_observation(_obs("Breaking.Bad.S01E01.Pilot.720p.mkv"), lib)
+    assert m.episode_title == "Pilot"
+    m2 = match_observation(_obs("Show.S01E02.mkv"), lib)
+    assert m2.episode_title is None

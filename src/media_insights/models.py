@@ -117,7 +117,7 @@ class MediaFile(Base):
     subtitle_summary: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     episode_numbers: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
-    part: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    episode_title: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
     fingerprint: Mapped[str | None] = mapped_column(String(128), nullable=True)
     fingerprint_strategy: Mapped[str | None] = mapped_column(String(16), nullable=True)

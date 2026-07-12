@@ -1,4 +1,10 @@
-"""Configuration: YAML on disk + environment overrides via pydantic-settings."""
+"""Configuration: YAML on disk + MI_* environment overrides.
+
+Env override syntax mirrors the YAML structure with `__` as the nesting
+separator: `MI_LOG_LEVEL=DEBUG`, `MI_DATABASE__URL=postgresql://...`,
+`MI_WATCHER__OBSERVER=polling`. List-valued fields (libraries, webhooks,
+exec_hooks) can only be set in the YAML file.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +15,6 @@ from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Library-kind hint seed for the matcher and classifier.
 LibraryKind = Literal["movie", "tv", "anime", "auto"]
@@ -84,18 +89,39 @@ class AppConfig(BaseModel):
     ffmpeg: FfmpegConfig = Field(default_factory=FfmpegConfig)
 
 
-class EnvSettings(BaseSettings):
-    """Environment overrides. Anything with MI_ prefix maps onto AppConfig fields."""
-
-    model_config = SettingsConfigDict(env_prefix="MI_", env_file=None, extra="ignore")
-
-    config: str | None = None
-    config_dir: str | None = None
-    data_dir: str | None = None
-    log_level: str | None = None
-
+_ENV_PREFIX = "MI_"
+# Env keys that aren't AppConfig fields.
+_ENV_SPECIAL = {"MI_CONFIG"}
+# Only allow overrides onto known top-level sections/fields, so unrelated
+# MI_-prefixed variables (e.g. from other tools) can't corrupt the config.
+_ENV_ALLOWED_ROOTS = frozenset(AppConfig.model_fields) - {"libraries", "webhooks", "exec_hooks"}
 
 _PLACEHOLDER_RE = re.compile(r"\{config_dir\}|\{data_dir\}")
+
+
+def _env_overrides() -> dict[str, Any]:
+    """Collect MI_* env vars into a nested dict: MI_DATABASE__URL -> database.url."""
+    out: dict[str, Any] = {}
+    for key, value in os.environ.items():
+        if not key.startswith(_ENV_PREFIX) or key in _ENV_SPECIAL:
+            continue
+        parts = key[len(_ENV_PREFIX):].lower().split("__")
+        if parts[0] not in _ENV_ALLOWED_ROOTS:
+            continue
+        node = out
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = value
+    return out
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
 
 
 def _expand_placeholders(raw: dict[str, Any], config_dir: str, data_dir: str) -> dict[str, Any]:
@@ -116,19 +142,13 @@ def _expand_placeholders(raw: dict[str, Any], config_dir: str, data_dir: str) ->
 
 def load_config(path: str | os.PathLike[str] | None = None) -> AppConfig:
     """Load config: defaults, then YAML file, then env (MI_*)."""
-    env = EnvSettings()
-    config_path = Path(path or env.config or "/config/config.yaml")
+    config_path = Path(path or os.environ.get("MI_CONFIG") or "/config/config.yaml")
     raw: dict[str, Any] = {}
     if config_path.is_file():
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
 
     # Env overrides take precedence over YAML.
-    if env.config_dir is not None:
-        raw["config_dir"] = env.config_dir
-    if env.data_dir is not None:
-        raw["data_dir"] = env.data_dir
-    if env.log_level is not None:
-        raw["log_level"] = env.log_level
+    _deep_merge(raw, _env_overrides())
 
     # Now derive the placeholder source from the resolved values.
     config_dir = str(raw.get("config_dir") or "/config")

@@ -38,7 +38,9 @@ def iter_video_files(
 
     if root.is_file():
         if root.suffix.lower() in VIDEO_EXTS:
-            yield FoundFile(path=root, parent=root.parent, plexmatch_path=_nearest_plexmatch(root))
+            yield FoundFile(
+                path=root, parent=root.parent, plexmatch_path=find_nearest_plexmatch(root)
+            )
         return
 
     plexmatch_cache: dict[Path, Path | None] = {}
@@ -75,11 +77,18 @@ def iter_video_files(
             continue
 
 
-def _nearest_plexmatch(path: Path) -> Path | None:
+def find_nearest_plexmatch(path: Path, stop_at: Path | None = None) -> Path | None:
+    """Walk up from `path` looking for a .plexmatch file.
+
+    `stop_at` bounds the walk to a library root so a stray .plexmatch above
+    the library can't hijack the match.
+    """
     for parent in (path.parent, *path.parents):
         candidate = parent / PLEXMATCH_NAME
         if candidate.is_file():
             return candidate
+        if stop_at is not None and parent == stop_at:
+            break
     return None
 
 
@@ -99,7 +108,3 @@ def collect_subtitle_sidecars(video_path: Path) -> list[Path]:
         if entry.stem.startswith(stem + "."):
             siblings.append(entry)
     return siblings
-
-
-def collect_sidecars_for_path(path: Path) -> list[Path]:
-    return collect_subtitle_sidecars(path)

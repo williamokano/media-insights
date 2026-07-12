@@ -21,8 +21,10 @@ from media_insights.discovery import (
     iter_video_files,
 )
 from media_insights.discovery.subtitles import parse_sidecar
+from media_insights.discovery.walker import find_nearest_plexmatch
 from media_insights.events import bus
 from media_insights.matching.matcher import MatchResult, match_observation
+from media_insights.matching.parser import parse as parse_title
 from media_insights.models import (
     Library,
     MediaFile,
@@ -50,13 +52,15 @@ def _library_record(session: Session, lib: LibraryConfig) -> Library:
 
 def _item_record(
     session: Session, library: Library, match: MatchResult
-) -> MediaItem:
+) -> tuple[MediaItem, bool]:
+    """Find or create the MediaItem for a match. Returns (item, created)."""
     rows = (
         session.query(MediaItem)
         .filter(MediaItem.library_id == library.id, MediaItem.title == match.title)
         .all()
     )
     item = next((r for r in rows if r.year == match.year), None) or rows[0] if rows else None
+    created = item is None
     if item is None:
         item = MediaItem(
             library_id=library.id,
@@ -86,7 +90,7 @@ def _item_record(
             item.anidb_id = match.anidb_id
         if match.match_status == "matched" and item.match_status in ("unmatched", "unresolved"):
             item.match_status = "matched"
-    return item
+    return item, created
 
 
 def _season_record(session: Session, item: MediaItem, number: int | None) -> Season:
@@ -118,6 +122,7 @@ def _file_snapshot(file: MediaFile) -> dict:
         "audio_summary": file.audio_summary,
         "subtitle_summary": file.subtitle_summary,
         "episode_numbers": list(file.episode_numbers or []),
+        "episode_title": file.episode_title,
         "fingerprint": file.fingerprint,
         "fingerprint_strategy": file.fingerprint_strategy,
         "tracks": [
@@ -235,6 +240,7 @@ def scan_library(cfg: AppConfig, lib: LibraryConfig, *, force: bool = False) -> 
         "files_added": 0,
         "files_changed": 0,
         "files_unchanged": 0,
+        "files_removed": 0,
         "errors": 0,
         "started_at": started.isoformat(),
     }
@@ -244,24 +250,33 @@ def scan_library(cfg: AppConfig, lib: LibraryConfig, *, force: bool = False) -> 
             summary["files_seen"] += 1
             try:
                 outcome = _process_file(
-                    session, cfg, library, found, force=force
+                    session, cfg, library, found, force=force, summary=summary
                 )
             except Exception as exc:
                 log.exception("scan failed for %s: %s", found.path, exc)
                 summary["errors"] += 1
                 continue
             summary[outcome] = summary.get(outcome, 0) + 1
+        summary["files_removed"] = _prune_missing(session, library)
         _reclassify_library(session, library)
     summary["finished_at"] = dt.datetime.now(dt.UTC).isoformat()
     return summary
 
 
 def _process_file(
-    session: Session, cfg: AppConfig, library: Library, found: FoundFile, *, force: bool
+    session: Session,
+    cfg: AppConfig,
+    library: Library,
+    found: FoundFile,
+    *,
+    force: bool,
+    summary: dict[str, Any] | None = None,
 ) -> str:
     obs = FileObservation(found=found)
     match = match_observation(obs, _as_libcfg(library))
-    item = _item_record(session, library, match)
+    item, item_created = _item_record(session, library, match)
+    if item_created and summary is not None:
+        summary["items_added"] += 1
     season_number = match.season if match.kind == "show" else None
     season = _season_record(session, item, season_number)
 
@@ -287,6 +302,7 @@ def _process_file(
         session.add(file_row)
         session.flush()
     file_row.episode_numbers = match.episode_numbers or []
+    file_row.episode_title = match.episode_title
     file_row.last_seen = dt.datetime.now(dt.UTC)
 
     old_snapshot = _file_snapshot(file_row) if existing is not None else None
@@ -345,10 +361,67 @@ def _as_libcfg(library: Library) -> LibraryConfig:
     return LibraryConfig(name=library.name, path=library.path, kind=library.kind)  # type: ignore[arg-type]
 
 
+def _remove_file(session: Session, file: MediaFile) -> None:
+    """Emit file.removed with the last-known snapshot, then drop the row.
+
+    The file is detached from the season's collection (delete-orphan cascade
+    performs the actual DELETE) so the emptiness checks below see reality.
+    """
+    bus.record_event(
+        session,
+        type_="file.removed",
+        subject_id=file.id,
+        subject_path=file.path,
+        old=_file_snapshot(file),
+        new=None,
+    )
+    file.season.files.remove(file)
+
+
+def _cleanup_empty(session: Session, item: MediaItem) -> None:
+    for season in list(item.seasons):
+        if not season.files:
+            item.seasons.remove(season)
+    if not item.seasons:
+        session.delete(item)
+
+
+def _prune_missing(session: Session, library: Library) -> int:
+    """Drop rows for files that no longer exist; clean up empty seasons/items."""
+    removed = 0
+    for item in list(library.items):
+        for season in list(item.seasons):
+            for file in list(season.files):
+                if not Path(file.path).exists():
+                    _remove_file(session, file)
+                    removed += 1
+        _cleanup_empty(session, item)
+    if removed:
+        session.flush()
+        log.info("pruned %d missing file(s) from %s", removed, library.name)
+    return removed
+
+
+def handle_missing_path(cfg: AppConfig, path: str) -> bool:
+    """Watcher hook for a deleted file. Returns True if a row was removed."""
+    _ensure_db(cfg)
+    with session_scope() as session:
+        file = session.query(MediaFile).filter(MediaFile.path == path).one_or_none()
+        if file is None:
+            return False
+        item = file.season.item
+        _remove_file(session, file)
+        _cleanup_empty(session, item)
+    return True
+
+
 def _reclassify_library(session: Session, library: Library) -> None:
     for item in library.items:
         files = [f for season in item.seasons for f in season.files]
         tracks = [t for f in files for t in f.tracks]
+        # Release-name signals come from one representative file.
+        raw_name = Path(files[0].path).name if files else None
+        parsed = parse_title(raw_name) if raw_name else None
         result: Classification = classify(
             MatchResult(
                 title=item.title,
@@ -366,6 +439,8 @@ def _reclassify_library(session: Session, library: Library) -> None:
             ),
             files=files,
             tracks=tracks,
+            parsed=parsed,
+            raw_name=raw_name,
             manual_override=item.classification_override,
         )
         if not item.classification_override:
@@ -381,8 +456,6 @@ def scan_all(cfg: AppConfig, *, force: bool = False) -> list[dict]:
 
 def manual_rescan_path(cfg: AppConfig, path: str) -> str:
     """Scan a single path in its owning library. Returns the outcome key."""
-    from pathlib import Path
-
     _ensure_db(cfg)
     target = Path(path)
     owning = _find_library_for_path(cfg, target)
@@ -394,7 +467,7 @@ def manual_rescan_path(cfg: AppConfig, path: str) -> str:
         found = FoundFile(
             path=target,
             parent=target.parent,
-            plexmatch_path=None,
+            plexmatch_path=find_nearest_plexmatch(target, stop_at=Path(owning.path)),
         )
         outcome = _process_file(session, cfg, library, found, force=True)
         _reclassify_library(session, library)

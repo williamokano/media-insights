@@ -56,6 +56,22 @@ def test_anime_from_japanese_audio() -> None:
     assert any("japanese" in r.lower() for r in cls.reasons)
 
 
+def test_fansub_release_name_signals_anime_without_japanese_audio() -> None:
+    """A dubbed release in an auto library: the release name must carry it."""
+    from media_insights.matching.parser import parse as parse_title
+
+    raw_name = "[SubsPlease] Frieren - 01 (1080p) [ABCDEF].mkv"
+    match = MatchResult(
+        title="Frieren", year=None, kind="show", season=None,
+        episode_numbers=[1], match_status="unresolved", library_kind_hint="auto",
+    )
+    files = _mk_files(1)
+    tracks = _mk_tracks(["en"], [])  # dubbed: no Japanese audio signal
+    cls = classify(match, files, tracks, parsed=parse_title(raw_name), raw_name=raw_name)
+    assert cls.label == "anime"
+    assert any("subsplease" in r.lower() or "bracket" in r.lower() for r in cls.reasons)
+
+
 def test_tv_default_for_library_hint_tv() -> None:
     match = MatchResult(
         title="Cowboy Bebop", year=1998, kind="show", season=1,

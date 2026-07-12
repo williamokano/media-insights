@@ -38,6 +38,7 @@ class MatchResult:
     anidb_id: int | None = None
     identified_via: str | None = None  # plexmatch | guessit | provider | manual
     library_kind_hint: str = "auto"
+    episode_title: str | None = None
 
 
 def _combine_plexmatch_match(
@@ -66,6 +67,7 @@ def _combine_plexmatch_match(
         anidb_id=pm.anidb_id,
         identified_via="plexmatch",
         library_kind_hint=lib.kind,
+        episode_title=parsed.episode_title,
     )
 
 
@@ -118,4 +120,5 @@ def match_observation(obs: FileObservation, lib: LibraryConfig) -> MatchResult:
         match_status=status,
         identified_via=identified_via,
         library_kind_hint=lib.kind,
+        episode_title=parsed.episode_title,
     )

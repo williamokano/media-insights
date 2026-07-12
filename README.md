@@ -7,7 +7,7 @@ Designed for an `*-arr`-style Docker deployment: one `/config` volume for state,
 ## Features
 
 - **Offline-first matching.** `.plexmatch` + folder-name parsing via [guessit] cover most real-world releases with no API keys. Pluggable `Provider` interface for TMDB/TVDB/AniList later.
-- **Technical truth, normalized.** Every track (video / audio / subtitle, embedded or external sidecar) is its own row — so queries like *"files with no English subtitle"* or *"anything still x264"* are SQL, not file scanning.
+- **Technical truth, normalized.** Every track (video / audio / subtitle, embedded or external sidecar) is its own row — so queries like *"files with no English subtitle"* or *"anything still x264"* are SQL, not file scanning. Episode numbers and titles are extracted per file.
 - **Scored classification.** Anime / TV / movie labels come with confidence and a human-readable list of reasons. Manual overrides always win.
 - **Unmatched queue.** Items without external IDs (and items guessit couldn't even name) land in `/unmatched` for one-click identification.
 - **Watcher + deep scan.** `watchdog` for inotify (with `PollingObserver` fallback for NFS/SMB) plus a periodic deep scan. Files are fingerprinted (BLAKE2b over first/last 8 MiB + size by default) so re-scans skip unchanged work and detect Arr upgrades.
@@ -40,6 +40,10 @@ Volumes:
 - `/config` — `config.yaml`, `media_insights.db`, WAL/SHM files. Persist this.
 - `/data` — your media library roots. Mount read-only. The container doesn't
   modify media files.
+
+Set `PUID` / `PGID` (default `1000:1000`) to run the service as your host
+user — the same convention as the arr stack. The entrypoint remaps the
+internal user, chowns `/config`, and drops privileges before starting.
 
 ## Quickstart — uv (local dev)
 
@@ -115,9 +119,10 @@ ffmpeg:
   mediainfo_cli: ""          # optional; ffprobe-only if absent
 ```
 
-Override anything from the environment with `MI_`-prefixed env vars: e.g.
-`MI_LOG_LEVEL=DEBUG`, `MI_DATABASE__URL=postgres://...`,
-`MI_WATCHER__OBSERVER=polling`.
+Override anything from the environment with `MI_`-prefixed env vars, using
+`__` for nesting: `MI_LOG_LEVEL=DEBUG`, `MI_DATABASE__URL=postgresql://...`,
+`MI_WATCHER__OBSERVER=polling`, `MI_SERVER__PORT=9000`. List-valued fields
+(`libraries`, `webhooks`, `exec_hooks`) can only be set in the YAML file.
 
 ## CLI
 
@@ -156,8 +161,19 @@ Web UI pages: `/dashboard`, `/libraries`, `/items/{id}`, `/unmatched`,
 
 ## Webhook payload
 
-Every change (file added, file changed, item identified, ...) is delivered as
-a JSON POST. The body always carries `old` and `new` snapshots.
+Every change is delivered as a JSON POST carrying `old` and `new` snapshots.
+Event types:
+
+| Type | old | new |
+|---|---|---|
+| `file.added` | `null` | full file snapshot (tracks, codecs, fingerprint) |
+| `file.changed` | previous snapshot | fresh probe |
+| `file.removed` | last-known snapshot | `null` |
+| `item.identified` | previous IDs / match status | updated IDs / match status |
+
+With no webhooks or exec hooks configured, events are still written to the
+database as an audit log (`delivery_status: skipped`) — nothing is lost, and
+nothing is reported as a failure.
 
 ```json
 {
@@ -259,7 +275,7 @@ as a safety net for fresh installs.
 
 ```
 src/media_insights/
-  config.py            pydantic-settings; YAML + MI_* env
+  config.py            pydantic models; YAML + nested MI_* env overrides
   db.py, models.py     SQLAlchemy 2.0 typed ORM, WAL pragmas
   probe/               ffprobe + pymediainfo + normalize
   discovery/           walker, fingerprint, plexmatch, subtitles, grouping

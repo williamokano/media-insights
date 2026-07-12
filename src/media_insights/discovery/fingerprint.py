@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -89,8 +88,3 @@ def fast_change_check(path: Path, stored_size: int | None, stored_mtime: float |
     if st.st_size != stored_size:
         return True
     return abs(st.st_mtime - stored_mtime) > 1e-3
-
-
-# Keep the helper around even if the cache isn't used yet; it documents intent.
-def delete_if_missing(path: Path) -> bool:
-    return not os.path.exists(path)

@@ -95,16 +95,31 @@ async def lifespan(app: FastAPI):
 
 
 def _debounced_rescan(cfg: AppConfig, path) -> None:
-    """Watcher callback. If a video file changed, rescan its owning library."""
+    """Watcher callback: rescan changed video files, prune deleted ones."""
     from pathlib import Path
 
     from media_insights.discovery.extensions import VIDEO_EXTS
+    from media_insights.scanner import handle_missing_path
 
     try:
         target = Path(path)
     except Exception:
         return
     if not target.exists():
+        # Deleted file (or a directory that took its files with it). A single
+        # video row is pruned directly; anything else falls back to a library
+        # scan whose prune pass reconciles the rest.
+        if target.suffix.lower() in VIDEO_EXTS:
+            log.info("watcher -> remove %s", target)
+            try:
+                handle_missing_path(cfg, str(target))
+            except Exception as exc:
+                log.warning("watcher removal failed for %s: %s", target, exc)
+        else:
+            owning = _lib_for_missing(cfg, target)
+            if owning:
+                log.info("watcher -> deletion under %s, rescanning library", owning.name)
+                scan_library(cfg, owning)
         return
     if target.is_dir():
         owning = _lib_for(cfg, target)
@@ -121,6 +136,16 @@ def _debounced_rescan(cfg: AppConfig, path) -> None:
         log.warning("watcher rescan failed for %s: %s", target, exc)
 
 
+def _lib_for_missing(cfg: AppConfig, target) -> Any:
+    """Like _lib_for, but must not resolve() a path that no longer exists."""
+    target_str = str(target)
+    for lib in cfg.libraries:
+        root = lib.path.rstrip("/")
+        if target_str == root or target_str.startswith(root + "/"):
+            return lib
+    return None
+
+
 def _lib_for(cfg: AppConfig, target) -> Any:
     target_str = str(target.resolve())
     for lib in cfg.libraries:
@@ -128,6 +153,19 @@ def _lib_for(cfg: AppConfig, target) -> Any:
         if target_str == root or target_str.startswith(root + "/"):
             return lib
     return None
+
+
+def _identity_snapshot(item: MediaItem) -> dict:
+    return {
+        "match_status": item.match_status,
+        "classification_label": item.classification_label,
+        "ids": {
+            "imdb": item.imdb_id,
+            "tmdb": item.tmdb_id,
+            "tvdb": item.tvdb_id,
+            "anidb": item.anidb_id,
+        },
+    }
 
 
 def create_app() -> FastAPI:
@@ -171,9 +209,12 @@ def create_app() -> FastAPI:
 
     @app.post("/api/items/{item_id}/identify")
     def identify_item(item_id: int, body: IdentifyRequest, session: Session = Depends(get_session)) -> dict:
+        from media_insights.events import bus
+
         item = session.get(MediaItem, item_id)
         if not item:
             raise HTTPException(404, "item not found")
+        old = _identity_snapshot(item)
         if body.imdb_id is not None:
             item.imdb_id = body.imdb_id
         if body.tmdb_id is not None:
@@ -191,8 +232,16 @@ def create_app() -> FastAPI:
             item.classification_override = True
         if body.imdb_id or body.tmdb_id or body.tvdb_id or body.anidb_id or body.guid:
             item.match_status = "matched"
-        elif item.match_status not in ("unmatched", "unresolved"):
-            pass  # keep existing status if not in queue
+        new = _identity_snapshot(item)
+        if new != old:
+            bus.record_event(
+                session,
+                type_="item.identified",
+                subject_id=item.id,
+                subject_path=None,
+                old=old,
+                new=new,
+            )
         session.commit()
         return serialise_item(item)
 

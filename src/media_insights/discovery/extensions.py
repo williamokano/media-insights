@@ -8,6 +8,3 @@ VIDEO_EXTS = {
 }
 SUBTITLE_EXTS = {".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt", ".sup", ".smi"}
 PLEXMATCH_NAME = ".plexmatch"
-
-# Group prefixes typical of fansub releases, used as a soft anime signal.
-FANSUB_PREFIX_RE = __import__("re").compile(r"^\[(?P<group>[^\]]+)\]")

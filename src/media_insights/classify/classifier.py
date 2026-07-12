@@ -49,9 +49,15 @@ def classify(
     match: MatchResult,
     files: list[MediaFile],
     tracks: list[Track],
+    parsed: ParsedTitle | None = None,
+    raw_name: str | None = None,
     manual_override: bool = False,
 ) -> Classification:
-    """Return the best label + confidence + reasons for the title."""
+    """Return the best label + confidence + reasons for the title.
+
+    `parsed`/`raw_name` come from a representative file of the title and feed
+    the release-name signals (fansub groups, guessit's anime flag).
+    """
     audio_languages: list[str] = [t.language for t in tracks if t.kind == "audio" and t.language]
     sub_languages: list[str] = [t.language for t in tracks if t.kind == "subtitle" and t.language]
 
@@ -102,6 +108,8 @@ def classify(
         reasons["tv"].append(f"multiple files ({n_files})")
         reasons["anime"].append(f"multiple files ({n_files})")
 
+    apply_parsed_signals(scores, reasons, parsed, raw_name)
+
     return _pick(scores, reasons, manual_override=manual_override)
 
 
@@ -115,17 +123,32 @@ def _pick(
     return Classification(label=label, confidence=confidence, reasons=reasons[label])
 
 
-def apply_parsed_signals(scores: dict[str, float], reasons: dict[str, list[str]], parsed: ParsedTitle | None) -> None:
-    """Optional bonus signal from guessit on a representative file."""
-    if parsed is None:
-        return
-    if parsed.anime:
-        scores["anime"] += 0.2
-        reasons["anime"].append("guessit anime flag")
-    release_group = parsed.release_group or ""
-    if release_group and release_group in _ANIME_LIKELY_GROUPS:
-        scores["anime"] += 0.25
-        reasons["anime"].append(f"fansub release group: {release_group}")
-    elif release_group and _ANIME_GROUP_RE.match(parsed.title or ""):
-        scores["anime"] += 0.1
-        reasons["anime"].append("bracket-prefixed release name")
+def apply_parsed_signals(
+    scores: dict[str, float],
+    reasons: dict[str, list[str]],
+    parsed: ParsedTitle | None,
+    raw_name: str | None = None,
+) -> None:
+    """Bonus signals from the release name of a representative file."""
+    if parsed is not None:
+        if parsed.anime:
+            scores["anime"] += 0.2
+            reasons["anime"].append("guessit anime flag")
+        release_group = parsed.release_group or ""
+        if release_group in _ANIME_LIKELY_GROUPS:
+            scores["anime"] += 0.35
+            reasons["anime"].append(f"fansub release group: {release_group}")
+            return
+    # guessit often mistakes the trailing CRC tag for the release group, so
+    # the leading [Group] bracket is read off the raw filename instead.
+    if raw_name:
+        bracket = _ANIME_GROUP_RE.match(raw_name)
+        if bracket is None:
+            return
+        group = bracket.group("group")
+        if group in _ANIME_LIKELY_GROUPS:
+            scores["anime"] += 0.35
+            reasons["anime"].append(f"fansub release group: {group}")
+        else:
+            scores["anime"] += 0.15
+            reasons["anime"].append("bracket-prefixed release name")

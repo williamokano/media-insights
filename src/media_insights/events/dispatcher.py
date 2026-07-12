@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
 
-from media_insights.config import AppConfig
+from media_insights.config import AppConfig, ExecHookConfig, WebhookConfig
 from media_insights.db import session_scope
 from media_insights.events import bus
 from media_insights.events import exec as exec_hook
@@ -22,6 +21,9 @@ class Dispatcher:
     Designed to be started once during the FastAPI lifespan and run for the
     lifetime of the process. Every dispatch is wrapped in its own transaction
     so a single bad event can't poison the queue.
+
+    With no hooks configured, pending events are marked `skipped` — they stay
+    in the database as an audit log but never count as delivery failures.
     """
 
     def __init__(self, cfg: AppConfig, poll_seconds: float = 5.0) -> None:
@@ -52,23 +54,41 @@ class Dispatcher:
                 log.exception("dispatcher tick failed: %s", exc)
             self._stop.wait(self._poll)
 
+    def _configured_hooks(self) -> tuple[list[WebhookConfig], list[ExecHookConfig]]:
+        webhooks = [w for w in self._cfg.webhooks if w.url]
+        exec_hooks = [h for h in self._cfg.exec_hooks if h.command]
+        return webhooks, exec_hooks
+
     def drain_once(self) -> int:
         """Dispatch all currently pending events. Returns count processed."""
+        webhooks, exec_hooks = self._configured_hooks()
+        max_attempts = max((w.max_attempts for w in webhooks), default=10)
+
         with session_scope() as session:
-            events = list(bus.due_events(session, max_attempts=max(h.max_attempts for h in self._cfg.webhooks) if self._cfg.webhooks else 10))
+            events = list(bus.due_events(session, max_attempts=max_attempts))
+            if not webhooks and not exec_hooks:
+                # No delivery targets: keep the events as audit rows, but
+                # don't burn retry attempts or flag them as failures.
+                for event in events:
+                    event.delivery_status = "skipped"
+                return len(events)
+
         processed = 0
         for event in events:
-            self._dispatch(event)
+            self._dispatch(event, webhooks, exec_hooks, max_attempts)
             processed += 1
         return processed
 
-    def _dispatch(self, event: EventModel) -> None:
-        attempts = max((h.max_attempts for h in self._cfg.webhooks), default=10)
+    def _dispatch(
+        self,
+        event: EventModel,
+        webhooks: list[WebhookConfig],
+        exec_hooks: list[ExecHookConfig],
+        max_attempts: int,
+    ) -> None:
         any_success = False
         last_error: str | None = None
-        for webhook in self._cfg.webhooks:
-            if not webhook.url:
-                continue
+        for webhook in webhooks:
             try:
                 webhook_hook.deliver(webhook, event)
             except Exception as exc:
@@ -76,9 +96,7 @@ class Dispatcher:
                 last_error = str(exc)
             else:
                 any_success = True
-        for hook in self._cfg.exec_hooks:
-            if not hook.command:
-                continue
+        for hook in exec_hooks:
             try:
                 exec_hook.deliver(hook, event)
             except Exception as exc:
@@ -93,13 +111,8 @@ class Dispatcher:
                 return
             if any_success:
                 bus.mark_sent(row)
-                row.delivery_attempts = min(row.delivery_attempts + 1, attempts)
             else:
                 bus.mark_failed(row, last_error or "no delivery succeeded")
-                if row.delivery_attempts >= attempts:
+                if row.delivery_attempts >= max_attempts:
                     row.delivery_status = "failed"
                     log.error("event %s gave up after %s attempts", event.id, row.delivery_attempts)
-
-
-# Type alias kept to avoid circular imports in tests
-DispatchFn = Callable[[EventModel], None]

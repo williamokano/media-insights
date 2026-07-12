@@ -64,6 +64,7 @@ dl.metadata dt { color: var(--muted); }
 .status-pending { background: var(--warn); color: #000; }
 .status-sent { background: var(--ok); color: #000; }
 .status-failed { background: var(--err); color: #000; }
+.status-skipped { background: var(--border); color: var(--muted); }
 .event-time { color: var(--muted); margin-left: auto; font-size: 12px; }
 
 input, select, button {

@@ -16,9 +16,11 @@ from typing import TYPE_CHECKING
 
 from watchdog.events import (
     DirCreatedEvent,
+    DirDeletedEvent,
     DirModifiedEvent,
     DirMovedEvent,
     FileCreatedEvent,
+    FileDeletedEvent,
     FileModifiedEvent,
     FileMovedEvent,
 )
@@ -149,7 +151,12 @@ class _WatchdogBridge:
     def dispatch(self, event) -> None:  # type: ignore[no-untyped-def]
         if isinstance(
             event,
-            (FileCreatedEvent, FileModifiedEvent, FileMovedEvent,
-             DirCreatedEvent, DirModifiedEvent, DirMovedEvent),
+            (FileCreatedEvent, FileModifiedEvent, FileMovedEvent, FileDeletedEvent,
+             DirCreatedEvent, DirModifiedEvent, DirMovedEvent, DirDeletedEvent),
         ):
             self._handler.feed(Path(str(event.src_path)))
+            # A move leaves the old path stale and creates a new one;
+            # feed the destination too so both sides get reconciled.
+            dest = getattr(event, "dest_path", None)
+            if dest:
+                self._handler.feed(Path(str(dest)))
