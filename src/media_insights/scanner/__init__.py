@@ -7,6 +7,7 @@ from media_insights.scanner.service import (
     get_or_create_library,
     handle_missing_path,
     manual_rescan_path,
+    reclassify_all,
     scan_all,
     scan_library,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "get_or_create_library",
     "handle_missing_path",
     "manual_rescan_path",
+    "reclassify_all",
     "scan_all",
     "scan_library",
 ]

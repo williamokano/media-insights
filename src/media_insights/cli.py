@@ -29,6 +29,21 @@ def _setup_logging(level: str) -> None:
     )
 
 
+class HealthCheckFilter(logging.Filter):
+    """Drop /healthz from the uvicorn access log.
+
+    Docker's healthcheck polls it every few seconds forever, which buries
+    every log line that's actually worth reading. Uvicorn puts the request
+    path in record.args (client, method, path, http_version, status).
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3:
+            return "/healthz" not in str(args[2])
+        return True
+
+
 def _load_cfg(config: str | None) -> AppConfig:
     global _cfg, _path
     if _cfg is None or config:
@@ -87,6 +102,7 @@ def cmd_serve(
     configure(cfg, _config_path())
     bind_host = host or cfg.server.host
     bind_port = port or cfg.server.port
+    logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
     api_app = create_app()
     uvicorn.run(api_app, host=bind_host, port=bind_port, log_level=cfg.log_level.lower())
 

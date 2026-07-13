@@ -529,43 +529,108 @@ def handle_missing_path(cfg: AppConfig, path: str) -> bool:
     return True
 
 
+def _classification_snapshot(item: MediaItem) -> dict:
+    return {
+        "classification_label": item.classification_label,
+        "classification_confidence": item.classification_confidence,
+        "classification_reasons": list(item.classification_reasons or []),
+    }
+
+
+def _reclassify_item(session: Session, library: Library, item: MediaItem) -> bool:
+    """Re-run classification for one item from data already in the database.
+
+    Everything classify() needs -- tracks, files, title -- is already stored,
+    so this never touches the disk. Returns True if the label actually moved.
+    """
+    if item.classification_override:
+        return False  # a manual verdict always wins
+
+    files = [f for season in item.seasons for f in season.files]
+    tracks = [t for f in files for t in f.tracks]
+    # Release-name signals come from one representative file.
+    raw_name = Path(files[0].path).name if files else None
+    parsed = parse_title(raw_name) if raw_name else None
+    result: Classification = classify(
+        MatchResult(
+            title=item.title,
+            year=item.year,
+            kind=item.kind,
+            season=None,
+            episode_numbers=[],
+            match_status=item.match_status,
+            imdb_id=item.imdb_id,
+            tmdb_id=item.tmdb_id,
+            tvdb_id=item.tvdb_id,
+            anidb_id=item.anidb_id,
+            identified_via=None,
+            library_kind_hint=library.kind,  # type: ignore[arg-type]
+        ),
+        files=files,
+        tracks=tracks,
+        parsed=parsed,
+        raw_name=raw_name,
+        manual_override=item.classification_override,
+    )
+
+    changed = result.label != item.classification_label
+    old = _classification_snapshot(item) if changed else None
+
+    item.classification_label = result.label
+    item.classification_confidence = result.confidence
+    item.classification_reasons = result.reasons
+
+    if changed:
+        log.info(
+            "reclassified: %r %s -> %s (confidence=%.0f%%, reasons=%s)",
+            item.title,
+            (old or {}).get("classification_label") or "none",
+            result.label,
+            result.confidence * 100,
+            result.reasons,
+        )
+        bus.record_event(
+            session,
+            type_="item.reclassified",
+            subject_id=item.id,
+            subject_path=None,
+            old=old,
+            new=_classification_snapshot(item),
+        )
+    return changed
+
+
 def _reclassify_library(session: Session, library: Library) -> None:
     for item in library.items:
-        files = [f for season in item.seasons for f in season.files]
-        tracks = [t for f in files for t in f.tracks]
-        # Release-name signals come from one representative file.
-        raw_name = Path(files[0].path).name if files else None
-        parsed = parse_title(raw_name) if raw_name else None
-        result: Classification = classify(
-            MatchResult(
-                title=item.title,
-                year=item.year,
-                kind=item.kind,
-                season=None,
-                episode_numbers=[],
-                match_status=item.match_status,
-                imdb_id=item.imdb_id,
-                tmdb_id=item.tmdb_id,
-                tvdb_id=item.tvdb_id,
-                anidb_id=item.anidb_id,
-                identified_via=None,
-                library_kind_hint=library.kind,  # type: ignore[arg-type]
-            ),
-            files=files,
-            tracks=tracks,
-            parsed=parsed,
-            raw_name=raw_name,
-            manual_override=item.classification_override,
-        )
-        if not item.classification_override:
-            if result.label != item.classification_label:
-                log.info(
-                    "classified: %r as %s (confidence=%.0f%%, reasons=%s)",
-                    item.title, result.label, result.confidence * 100, result.reasons,
-                )
-            item.classification_label = result.label
-            item.classification_confidence = result.confidence
-            item.classification_reasons = result.reasons
+        _reclassify_item(session, library, item)
+
+
+def reclassify_all(cfg: AppConfig) -> dict[str, Any]:
+    """Re-run classification across every library, from stored data only.
+
+    A rules change (e.g. reweighting the library hint) otherwise only takes
+    effect on a force-rescan, which re-probes every file on disk. Nothing
+    classify() reads has changed on disk, so this replays it against the
+    database instead -- seconds rather than a full re-probe of the library.
+    """
+    _ensure_db(cfg)
+    changed: list[dict[str, Any]] = []
+    total = 0
+    with session_scope() as session:
+        for library in session.query(Library).order_by(Library.name).all():
+            for item in library.items:
+                total += 1
+                before = item.classification_label
+                if _reclassify_item(session, library, item):
+                    changed.append({
+                        "id": item.id,
+                        "title": item.title,
+                        "library": library.name,
+                        "from": before,
+                        "to": item.classification_label,
+                    })
+    log.info("reclassify: %d items examined, %d relabelled", total, len(changed))
+    return {"items": total, "relabelled": len(changed), "changes": changed}
 
 
 def scan_all(cfg: AppConfig, *, force: bool = False, trigger: str = "manual") -> list[dict]:

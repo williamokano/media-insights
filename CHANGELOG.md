@@ -8,6 +8,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-13
+
+### Changed
+
+- **The library folder no longer decides a title's classification.** The
+  library's `kind` was weighted `0.7` — more than every other signal
+  combined — so an anime sitting in a `kind: tv` library scored `tv` 0.90 vs
+  `anime` 0.70 and was mislabelled no matter how obviously anime the file
+  was. That made a misfiled title *structurally impossible to detect*, which
+  defeats the point: folders get mixed up (drive migrations, bulk moves) and
+  that is exactly when you need the classifier to disagree with the folder.
+  The hint is now a `0.15` tiebreaker that only decides titles with no
+  evidence at all; any real signal outvotes it. When it gets overruled, the
+  verdict says so in its `reasons`, so a surprising label is auditable.
+- `matching/matcher.py` had the same flaw deciding movie-vs-show structure:
+  `lib.kind` was consulted *before* the parsed filename, so a movie misfiled
+  into a TV library was forced to `kind: show`. Parsed evidence now wins;
+  the folder is only a fallback when the name yields nothing.
+
+### Fixed
+
+- **A western show with a Japanese dub track was classified as anime.** The
+  audio test asked "is *any* audio track Japanese?" despite being named
+  `_has_japanese_primary`. Amazon's `Secret Level` — a western animated
+  anthology shipping English/German/Spanish/Japanese dubs with English
+  default — tripped it. Only the *primary* audio track (the default-flagged
+  one, or the first by stream position) counts as evidence of origin now.
+  Found by dry-running the new classifier against a real 93-title library
+  before shipping it.
+- `/titles` pagination returned a raw JSON validation error instead of the
+  next page: the pager carries every filter through to the next page,
+  including `unmatched=` (empty when unchecked), and FastAPI's `bool`
+  binding rejects `""`. Empty query values now uniformly mean "filter not
+  set" rather than 422 — consolidated into `query_params.py` and applied to
+  `/titles`, `/api/items` and `/api/tracks`, since this same bug had already
+  bitten `library=` twice.
+- `/healthz` no longer floods the access log. Docker's healthcheck polls it
+  every few seconds, burying everything worth reading.
+
+### Added
+
+- `POST /api/reclassify` — re-runs classification across every library from
+  data already in the database. Nothing the classifier reads lives on disk,
+  so a rules change (like this release's) applies in seconds instead of
+  requiring a force-rescan that re-probes every file. Emits
+  `item.reclassified` events for labels that actually move; manual overrides
+  are never touched.
+- **Misfiled worklist** — `GET /api/items?misfiled=true` and a `/misfiled`
+  page listing every title whose detected classification disagrees with the
+  library it's sitting in (an anime indexed inside a `tv` library, say).
+  Libraries with `kind: auto` assert nothing and are never listed. This is
+  the cleanup worklist for a library that got shuffled by a drive migration.
+
 ## [0.0.9] - 2026-07-13
 
 ### Fixed
@@ -227,7 +280,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (amd64/arm64) with `PUID`/`PGID` support,
   published to GHCR on tagged releases.
 
-[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.0.9...HEAD
+[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/williamokano/media-insights/compare/v0.0.9...v0.1.0
 [0.0.9]: https://github.com/williamokano/media-insights/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/williamokano/media-insights/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/williamokano/media-insights/compare/v0.0.6...v0.0.7

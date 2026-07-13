@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Misfiled &middot; media-insights{% endblock %}
+{% block content %}
+<h1>Misfiled titles</h1>
+
+<p class="notice">
+  Titles whose detected classification disagrees with the library they're
+  sitting in &mdash; e.g. an anime indexed inside a <code>tv</code> library.
+  Classification is based on the file's own evidence (audio language,
+  subtitles, release naming), not on which folder it happens to live in, so
+  these are the titles worth moving. Libraries with
+  <code>kind: auto</code> assert nothing and are never listed here.
+  <br>
+  Nothing is moved for you: this is a worklist. Wrong verdict? Open the title
+  and set the classification manually &mdash; a manual override always wins
+  and the title will drop off this list.
+</p>
+
+{% if not items %}
+  <p class="empty">Nothing misfiled &mdash; every title's classification agrees with its library.</p>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Title</th>
+      <th>Sitting in</th>
+      <th>Detected as</th>
+      <th>Why</th>
+      <th>Files</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in items %}
+    <tr>
+      <td>
+        <a href="/items/{{ row.item.id }}">{{ row.item.title }}</a>
+        {% if row.item.year %} <span class="year">({{ row.item.year }})</span>{% endif %}
+      </td>
+      <td>{{ row.library.name }} <span class="conf">({{ row.library.kind }})</span></td>
+      <td>
+        <strong>{{ row.item.classification_label }}</strong>
+        {% if row.item.classification_confidence is not none %}
+          <span class="conf">({{ '%.0f%%' % (row.item.classification_confidence * 100) }})</span>
+        {% endif %}
+      </td>
+      <td>
+        {% for reason in (row.item.classification_reasons or [])[:3] %}
+          <span class="conf">{{ reason }}</span>{% if not loop.last %}<br>{% endif %}
+        {% endfor %}
+      </td>
+      <td>{{ row.item.seasons | map(attribute='files') | map('length') | sum }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

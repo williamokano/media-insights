@@ -3,7 +3,10 @@
 Resolution order:
   1. .plexmatch metadata (highest trust)
   2. guessit parse of the file/folder name (medium trust)
-  3. Library hint (kind=auto when nothing else signals)
+  3. Library hint -- only as a last-resort fallback when nothing above yields
+     anything. It is deliberately not allowed to override parsed evidence:
+     folders get mixed up (that's the whole reason this tool exists), so a
+     movie sitting in a tv library must still be structured as a movie.
 
 Anything that survives without an external ID lands as `match_status=unmatched`
 in the database, surfaced by the API/UI for manual resolution.
@@ -72,13 +75,27 @@ def _combine_plexmatch_match(
 
 
 def _kind(pm: PlexMatch, parsed: ParsedTitle, lib: LibraryConfig) -> str:
-    if lib.kind in ("movie", "tv", "anime"):
-        return "show" if lib.kind in ("tv", "anime") else "movie"
+    """Decide movie-vs-show structure from evidence, not from the folder.
+
+    The library's kind used to be consulted first, which forced every file in
+    a `kind: tv` library to be structured as a show even when it plainly was
+    not -- the same folder-dominance flaw the classifier had (see
+    classify/classifier.py). The folder is now only a fallback for when the
+    name yields nothing at all.
+    """
+    # Episode markers are the strongest possible show signal.
+    if pm.episode_numbers or parsed.season is not None or parsed.episodes:
+        return "show"
     if parsed.kind == "movie":
         return "movie"
     if parsed.kind == "show":
         return "show"
-    return "show"  # default to show; the classifier can override later
+    # Nothing parseable: fall back to the library's declared kind.
+    if lib.kind == "movie":
+        return "movie"
+    if lib.kind in ("tv", "anime"):
+        return "show"
+    return "show"  # default to show; the classifier can override the label later
 
 
 def _fallback_title(parsed: ParsedTitle, lib: LibraryConfig) -> str:

@@ -101,3 +101,22 @@ def test_titles_page_handles_empty_library_filter(tmp_library) -> None:
     assert r.status_code == 200
     assert "<title>Titles" in r.text
     assert "Interstellar" in r.text
+
+
+def test_titles_pager_links_render_not_422(tmp_library) -> None:
+    """The pager carries every filter through to the next page, including
+    unmatched= (empty when the box is unchecked). An empty bool must mean
+    "not filtering", not a 422 -- this is the exact URL the pager builds."""
+    client = _client_for(tmp_library)
+    r = client.get("/titles?offset=50&limit=50&library=&classification=&unmatched=")
+    assert r.status_code == 200
+    assert "<title>Titles" in r.text
+
+
+def test_titles_empty_unmatched_does_not_filter(tmp_library) -> None:
+    """unmatched= (empty) must behave like the filter is off, i.e. show
+    everything -- not like unmatched=true."""
+    client = _client_for(tmp_library)
+    r = client.get("/titles?unmatched=")
+    assert r.status_code == 200
+    assert "Interstellar" in r.text

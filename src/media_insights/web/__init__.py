@@ -9,13 +9,7 @@ from sqlalchemy.orm import Session
 
 from media_insights.db import get_session
 from media_insights.models import ChangeEvent, Library, MediaItem
-
-
-def _parse_optional_id(value: str | None) -> int | None:
-    """HTML <select> "All ___" options submit an empty string, not an
-    omitted parameter -- FastAPI's int | None binding rejects "" outright,
-    so this is parsed as a plain string query param and converted by hand."""
-    return int(value) if value else None
+from media_insights.query_params import parse_optional_bool, parse_optional_id
 
 
 def mount_web(app: FastAPI, templates: Jinja2Templates | None) -> None:
@@ -53,18 +47,19 @@ def mount_web(app: FastAPI, templates: Jinja2Templates | None) -> None:
         request: Request,
         library: str | None = None,
         classification: str | None = None,
-        unmatched: bool = False,
+        unmatched: str | None = None,
         offset: int = 0,
         limit: int = Query(50, le=200),
         session: Session = Depends(get_session),
     ):
-        library_id = _parse_optional_id(library)
+        library_id = parse_optional_id(library)
+        only_unmatched = parse_optional_bool(unmatched)
         q = session.query(MediaItem)
         if library_id is not None:
             q = q.filter(MediaItem.library_id == library_id)
         if classification:
             q = q.filter(MediaItem.classification_label == classification)
-        if unmatched:
+        if only_unmatched:
             q = q.filter(MediaItem.match_status.in_(["unmatched", "unresolved"]))
         total = q.count()
         rows = q.order_by(MediaItem.title).offset(offset).limit(limit).all()
@@ -80,8 +75,37 @@ def mount_web(app: FastAPI, templates: Jinja2Templates | None) -> None:
                 "limit": limit,
                 "library": library_id,
                 "classification": classification,
-                "unmatched": unmatched,
+                "unmatched": only_unmatched,
             },
+        )
+
+    @app.get("/misfiled", response_class=HTMLResponse)
+    def misfiled(
+        request: Request,
+        session: Session = Depends(get_session),
+    ):
+        """Titles whose classification disagrees with the library they're in.
+
+        Library kinds and classification labels share the same vocabulary
+        (movie/tv/anime), so the disagreement is a straight inequality.
+        `kind: auto` libraries assert nothing, so nothing in them can be
+        misfiled.
+        """
+        rows = (
+            session.query(MediaItem, Library)
+            .join(Library, MediaItem.library_id == Library.id)
+            .filter(
+                Library.kind != "auto",
+                MediaItem.classification_label.isnot(None),
+                MediaItem.classification_label != Library.kind,
+            )
+            .order_by(Library.name, MediaItem.title)
+            .all()
+        )
+        return templates.TemplateResponse(
+            request,
+            "misfiled.html",
+            {"items": [{"item": item, "library": library} for item, library in rows]},
         )
 
     @app.get("/libraries", response_class=HTMLResponse)

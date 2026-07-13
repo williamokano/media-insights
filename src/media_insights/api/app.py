@@ -26,24 +26,19 @@ from media_insights.config import AppConfig, LibraryConfig, resolve_config_path
 from media_insights.db import get_session, init_engine, run_migrations, session_scope
 from media_insights.events import Dispatcher
 from media_insights.models import Library, MediaFile, MediaItem, Season, Track
+from media_insights.query_params import parse_optional_bool, parse_optional_id
 from media_insights.scanner import (
     MediaWatcher,
     ScanScheduler,
     get_or_create_library,
     manual_rescan_path,
+    reclassify_all,
     scan_all,
     scan_library,
 )
 from media_insights.web import mount_web
 
 log = logging.getLogger(__name__)
-
-
-def _parse_optional_id(value: str | None) -> int | None:
-    """An empty string ("?library=") is not the same as an omitted
-    parameter -- FastAPI's int | None binding rejects "" outright, so this
-    is accepted as a plain string query param and converted by hand."""
-    return int(value) if value else None
 
 
 class IdentifyRequest(BaseModel):
@@ -328,25 +323,46 @@ def create_app() -> FastAPI:
         )
         return ~has_track
 
+    def _misfiled_filter(q):
+        """Titles whose detected classification disagrees with the library
+        they're sitting in -- the drive-migration cleanup worklist.
+
+        Library kinds and classification labels share the same vocabulary
+        (movie/tv/anime), so a straight inequality is the whole test.
+        `kind: auto` libraries assert nothing, so nothing there can be
+        misfiled.
+        """
+        return (
+            q.join(Library, MediaItem.library_id == Library.id)
+            .filter(
+                Library.kind != "auto",
+                MediaItem.classification_label.isnot(None),
+                MediaItem.classification_label != Library.kind,
+            )
+        )
+
     @app.get("/api/items")
     def list_items(
         library: str | None = None,
         classification: str | None = None,
-        unmatched: bool = False,
+        unmatched: str | None = None,
+        misfiled: str | None = None,
         missing_subtitle_language: str | None = None,
         missing_audio_language: str | None = None,
         limit: int = Query(50, le=500),
         offset: int = 0,
         session: Session = Depends(get_session),
     ) -> dict:
-        library_id = _parse_optional_id(library)
+        library_id = parse_optional_id(library)
         q = session.query(MediaItem)
         if library_id is not None:
             q = q.filter(MediaItem.library_id == library_id)
         if classification:
             q = q.filter(MediaItem.classification_label == classification)
-        if unmatched:
+        if parse_optional_bool(unmatched):
             q = q.filter(MediaItem.match_status == "unmatched")
+        if parse_optional_bool(misfiled):
+            q = _misfiled_filter(q)
         if missing_subtitle_language:
             q = q.filter(_missing_track_language_filter(session, "subtitle", missing_subtitle_language))
         if missing_audio_language:
@@ -369,8 +385,8 @@ def create_app() -> FastAPI:
         offset: int = 0,
         session: Session = Depends(get_session),
     ) -> dict:
-        library_id = _parse_optional_id(library)
-        item_id = _parse_optional_id(item)
+        library_id = parse_optional_id(library)
+        item_id = parse_optional_id(item)
         q = (
             session.query(Track, MediaFile.id, MediaFile.path, MediaItem.id, MediaItem.title, MediaItem.library_id)
             .join(MediaFile, Track.file_id == MediaFile.id)
@@ -514,6 +530,16 @@ def create_app() -> FastAPI:
                     return scan_library(cfg, lib, force=True, trigger="api")
             raise HTTPException(404, f"no such library: {library}")
         return {"libraries": scan_all(cfg, force=True, trigger="api")}
+
+    @app.post("/api/reclassify")
+    def trigger_reclassify() -> dict:
+        """Re-run classification across the library without re-probing files.
+
+        Everything the classifier reads is already in the database, so a
+        rules change can be applied in seconds instead of a force-rescan of
+        every file on disk.
+        """
+        return reclassify_all(_require_config())
 
     @app.post("/api/rescan")
     def rescan_path(body: dict) -> dict:

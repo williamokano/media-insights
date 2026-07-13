@@ -80,6 +80,33 @@ def test_guessit_only_match_is_unresolved() -> None:
     assert m.imdb_id is None and m.tvdb_id is None
 
 
+def test_movie_in_tv_library_is_structured_as_a_movie() -> None:
+    """The library's kind used to be consulted before the parsed name, so a
+    movie misfiled into a tv library was forced to kind=show. Folders get
+    mixed up -- evidence from the name has to win."""
+    lib = LibraryConfig(name="TV Shows", path="/x", kind="tv")
+    m = match_observation(_obs("Interstellar.2014.1080p.BluRay.mkv"), lib)
+    assert m.kind == "movie"
+
+
+def test_episode_in_movie_library_is_structured_as_a_show() -> None:
+    """The mirror case: SxxExx markers beat a kind=movie library."""
+    lib = LibraryConfig(name="Movies", path="/x", kind="movie")
+    m = match_observation(_obs("Show.S01E02.1080p.mkv"), lib)
+    assert m.kind == "show"
+    assert m.season == 1
+    assert m.episode_numbers == [2]
+
+
+def test_library_kind_still_used_when_name_yields_nothing() -> None:
+    """The hint is a fallback, not dead weight: with an unparseable name it
+    still decides the structure."""
+    lib = LibraryConfig(name="Movies", path="/x", kind="movie")
+    obs = FileObservation(found=FoundFile(path=Path(""), parent=Path(""), plexmatch_path=None))
+    m = match_observation(obs, lib)
+    assert m.kind == "movie"
+
+
 def test_parse_plexmatch_handles_missing_file(tmp_path: Path) -> None:
     assert parse_plexmatch(tmp_path / "missing") == PlexMatch()
 

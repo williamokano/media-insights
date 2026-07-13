@@ -255,7 +255,8 @@ media-insights version
 | POST   | `/api/libraries` | add a library — body `{"name", "path", "kind"}`; `path` must exist |
 | PUT    | `/api/libraries/{id}` | rename / repoint a library |
 | DELETE | `/api/libraries/{id}` | stop scanning/watching (data kept); add `?purge=true` to also delete its indexed data |
-| GET    | `/api/items` | filter by library / classification / unmatched / `missing_subtitle_language` / `missing_audio_language`; paginate |
+| GET    | `/api/items` | filter by library / classification / unmatched / `misfiled` / `missing_subtitle_language` / `missing_audio_language`; paginate |
+| POST   | `/api/reclassify` | re-run classification across all libraries from stored data (no re-probe) |
 | GET    | `/api/items/{id}` | full item incl. files + `video_tracks` / `audio_tracks` / `subtitle_tracks` |
 | POST   | `/api/items/{id}/identify` | attach `imdb_id` / `tmdb_id` / `tvdb_id` / `anidb_id` / `guid` / `classification` |
 | POST   | `/api/items/{id}/classification` | override label (`anime`/`tv`/`movie`) |
@@ -267,8 +268,9 @@ media-insights version
 | POST   | `/api/rescan` | body `{"path": "..."}` — single-path rescan |
 
 Web UI pages: `/dashboard`, `/libraries`, `/titles` (browsable, filterable
-list of every title — filter by library/classification/unmatched), `/items/{id}`,
-`/unmatched`, `/events`, `/search`. OpenAPI docs at `/docs`.
+list of every title — filter by library/classification/unmatched), `/misfiled`
+(titles whose classification disagrees with the library they're in),
+`/items/{id}`, `/unmatched`, `/events`, `/search`. OpenAPI docs at `/docs`.
 
 ## Webhook payload
 
@@ -326,19 +328,32 @@ Exec hooks receive the same JSON object on stdin.
 
 ## Classification
 
-Every `MediaItem` carries a label, confidence (0–1), and a list of reasons.
-The classifier is a scored-rules system:
+Every `MediaItem` carries a label, confidence, and a list of reasons.
+The classifier is a scored-rules system, driven by **evidence from the file
+itself** — not by the folder it happens to live in:
 
-- Library kind hint from config (strongest signal — e.g. `kind: anime` ⇒
-  anime baseline).
 - Matched via AniDB ID ⇒ anime.
-- Japanese primary audio + non-Japanese subtitles ⇒ strong anime signal.
-- Single-file structure ⇒ movie; multi-file ⇒ show.
-- Fansub-style release groups (`[SubsPlease]`, `Erai-raws`, ...) ⇒ anime bonus.
+- **Primary** audio is Japanese (the default-flagged track, not merely *any*
+  track — a western show with a Japanese dub is not anime) + non-Japanese
+  subtitles ⇒ strong anime signal.
+- Fansub-style release groups (`[SubsPlease]`, `Erai-raws`, ...) ⇒ anime.
 - guessit's `anime` flag ⇒ anime bonus.
+- Single-file structure ⇒ movie; multi-file ⇒ show.
+- Library `kind` from config ⇒ **tiebreaker only**. It decides titles with no
+  evidence at all, and is outvoted by any real signal. Folders get mixed up —
+  that's precisely when you need the classifier to be able to disagree with
+  one. When the hint is overruled, the verdict says so in its `reasons`.
+
+`confidence` is the winning label's share of the total score, so it reflects
+how far ahead of the alternatives it actually was.
+
+Titles whose label disagrees with the library they're in are listed at
+`/misfiled` (or `GET /api/items?misfiled=true`) — the cleanup worklist after
+a drive migration shuffles things.
 
 Per-item manual override (POST `/api/items/{id}/classification`) is sticky and
-always wins.
+always wins. `POST /api/reclassify` re-runs classification across the whole
+library from already-stored data, without re-probing any files.
 
 ## Subtitles
 
