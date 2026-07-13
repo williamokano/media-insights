@@ -39,6 +39,12 @@ def test_run_migrations_creates_full_schema_on_empty_db(tmp_path: Path) -> None:
     assert "alembic_version" in tables
     assert "language_raw" in track_columns
 
+    item_columns = {c["name"] for c in inspect(create_engine(url)).get_columns("media_items")}
+    assert {
+        "anilist_id", "provider_source", "provider_is_anime",
+        "provider_origin_country", "provider_genres", "provider_checked_at",
+    } <= item_columns
+
 
 def test_language_raw_backfill_copies_existing_language_value(tmp_path: Path) -> None:
     """Rows created before the language_raw column existed should end up

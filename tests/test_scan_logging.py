@@ -99,7 +99,45 @@ def test_startup_logs_offline_matching_disclaimer(tmp_path, caplog) -> None:
         pass
 
     messages = [r.message for r in caplog.records]
-    assert any("offline only" in m and "no TVDB/IMDB/TMDB" in m for m in messages)
+    # Offline is still the default, and startup says so -- but it now also says
+    # how to turn providers on, rather than claiming network calls are never
+    # made (which stopped being unconditionally true once providers landed).
+    assert any("offline only" in m and "no network calls" in m for m in messages)
+    assert any("providers.enabled=true" in m for m in messages)
+
+
+def test_startup_logs_which_providers_are_enabled(tmp_path, caplog) -> None:
+    from fastapi.testclient import TestClient
+
+    from media_insights.api import configure, create_app
+    from media_insights.config import (
+        AniListConfig,
+        AppConfig,
+        DatabaseConfig,
+        ProvidersConfig,
+        ScheduleConfig,
+        WatcherConfig,
+    )
+    from media_insights.db import init_engine, run_migrations
+
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    cfg = AppConfig(
+        config_dir=str(tmp_path),
+        database=DatabaseConfig(url=db_url),
+        watcher=WatcherConfig(enabled=False),
+        schedule=ScheduleConfig(enabled=False),
+        providers=ProvidersConfig(enabled=True, anilist=AniListConfig(enabled=True)),
+    )
+    init_engine(db_url)
+    run_migrations(db_url)
+    configure(cfg, tmp_path / "config.yaml")
+    app = create_app()
+
+    with caplog.at_level(logging.INFO, logger="media_insights.api.app"), TestClient(app):
+        pass
+
+    messages = [r.message for r in caplog.records]
+    assert any("online providers enabled" in m and "anilist" in m for m in messages)
 
 
 def test_dispatcher_logs_why_events_are_skipped(tmp_path, caplog) -> None:

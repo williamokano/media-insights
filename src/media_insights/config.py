@@ -74,6 +74,40 @@ class DatabaseConfig(BaseModel):
     url: str = ""
 
 
+class AniListConfig(BaseModel):
+    # No API key: AniList's public GraphQL endpoint is open. It's also the
+    # single best anime/not-anime oracle, so it's on by default whenever
+    # providers are enabled at all.
+    enabled: bool = True
+
+
+class TmdbConfig(BaseModel):
+    enabled: bool = False
+    # Also settable as MI_PROVIDERS__TMDB__API_KEY so keys can stay out of
+    # config.yaml entirely.
+    api_key: str = ""
+
+
+class TvdbConfig(BaseModel):
+    enabled: bool = False
+    api_key: str = ""
+    pin: str = ""  # only needed for user-subscription keys
+
+
+class ProvidersConfig(BaseModel):
+    """Online metadata lookups. Off by default: this tool works fully offline,
+    and enabling it is the user's explicit choice to make network calls."""
+
+    enabled: bool = False
+    timeout_seconds: float = 10.0
+    # A title's provider data is re-fetched only after this long. Metadata
+    # barely changes, and AniList allows just 30 requests/minute.
+    cache_ttl_days: int = 30
+    anilist: AniListConfig = Field(default_factory=AniListConfig)
+    tmdb: TmdbConfig = Field(default_factory=TmdbConfig)
+    tvdb: TvdbConfig = Field(default_factory=TvdbConfig)
+
+
 class AppConfig(BaseModel):
     config_dir: str = "/config"
     data_dir: str = "/data"
@@ -87,6 +121,7 @@ class AppConfig(BaseModel):
     exec_hooks: list[ExecHookConfig] = Field(default_factory=list)
     server: ServerConfig = Field(default_factory=ServerConfig)
     ffmpeg: FfmpegConfig = Field(default_factory=FfmpegConfig)
+    providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
 
 
 _ENV_PREFIX = "MI_"

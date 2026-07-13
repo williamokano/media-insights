@@ -68,3 +68,37 @@ server:
 ffmpeg:
   ffprobe: ""
   mediainfo_cli: ""       # optional; if absent, only ffprobe is used
+# Online metadata providers. OFF by default: media-insights indexes a library
+# perfectly well with no network access, and turning this on is your explicit
+# choice to make outbound calls.
+#
+# Why turn it on: local evidence can't always tell what a title *is*. An
+# English-dubbed anime with no Japanese audio track and no fansub tag looks
+# exactly like a western cartoon on disk -- which is how anime ends up
+# misfiled in a TV library and stays undetected. Providers close that gap,
+# and also fill in imdb/tmdb/tvdb IDs, which drains the unmatched queue.
+providers:
+  enabled: false
+  timeout_seconds: 10
+  cache_ttl_days: 30      # a title is only re-queried after this long
+
+  # AniList needs no API key. It indexes only anime, so a hit is the signal --
+  # and a miss (western cartoons, live-action) is meaningful too.
+  anilist:
+    enabled: true
+
+  # TMDB covers movies and TV, supplies origin_country + genres, and is the
+  # only practical way to get an IMDB id (IMDB has no free public API).
+  # It's also what distinguishes "animated but NOT anime" (Rick and Morty,
+  # Arcane) from actual anime. Free key: https://www.themoviedb.org/settings/api
+  # Can also be set via MI_PROVIDERS__TMDB__API_KEY to keep it out of this file.
+  tmdb:
+    enabled: false
+    api_key: ""
+
+  # TVDB v4. Series-focused; tags anime with an explicit `Anime` genre.
+  # Key: https://thetvdb.com/api-information  (MI_PROVIDERS__TVDB__API_KEY)
+  tvdb:
+    enabled: false
+    api_key: ""
+    pin: ""               # only for user-subscription keys

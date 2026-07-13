@@ -9,9 +9,9 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 ## Features
 
 - **Manage libraries from the UI or API — no restart needed.** Add, rename, or remove libraries from `/libraries` or `POST/PUT/DELETE /api/libraries`; changes write straight back into `config.yaml` (comments preserved) and the filesystem watcher picks up the new path immediately.
-- **Offline-first matching — genuinely offline.** No network calls are ever made to TVDB, IMDB, TMDB, or any other metadata provider. Titles are matched via `.plexmatch` files or filename/folder parsing ([guessit]) only; external IDs shown in the UI came from a `.plexmatch` file or from you attaching them manually via `/unmatched` or `POST /api/items/{id}/identify`. A `Provider` interface exists for plugging in TMDB/TVDB/AniList later, but nothing implements it yet.
+- **Offline-first — online only if you say so.** Out of the box no network calls are made at all: titles are matched from `.plexmatch` files and filename/folder parsing ([guessit]). Set `providers.enabled: true` to additionally look titles up against **AniList** (no API key needed), **TMDB** and **TVDB** — which identifies titles the files themselves can't, and fills in imdb/tmdb/tvdb IDs. Results are cached, so a stable library re-scans without touching the network.
 - **Technical truth, normalized.** Every track (video / audio / subtitle, embedded or external sidecar) is its own row — so queries like *"files with no English subtitle"* or *"anything still x264"* are SQL, not file scanning. Episode numbers and titles are extracted per file.
-- **Scored classification.** Anime / TV / movie labels come with confidence and a human-readable list of reasons. Manual overrides always win.
+- **Classification that can disagree with your folders.** Anime / TV / movie labels come from evidence — audio language, release naming, and (when enabled) metadata providers — *not* from which folder a title happens to sit in. The library's `kind` is only a tiebreaker. That's what makes `/misfiled` possible: a worklist of titles whose real identity doesn't match where they're filed. Every verdict carries a confidence and a list of reasons; manual overrides always win.
 - **Unmatched queue.** Items without external IDs (and items guessit couldn't even name) land in `/unmatched` for one-click identification.
 - **Watcher + deep scan.** `watchdog` for inotify (with `PollingObserver` fallback for NFS/SMB) plus a periodic deep scan. Files are fingerprinted (BLAKE2b over first/last 8 MiB + size by default) so re-scans skip unchanged work and detect Arr upgrades.
 - **Transactional outbox.** Old and new snapshots are written into the same DB transaction as the file row. A background dispatcher delivers them to webhooks (HMAC-signed) and exec hooks with retries. No loss on crash.
@@ -257,6 +257,7 @@ media-insights version
 | DELETE | `/api/libraries/{id}` | stop scanning/watching (data kept); add `?purge=true` to also delete its indexed data |
 | GET    | `/api/items` | filter by library / classification / unmatched / `misfiled` / `missing_subtitle_language` / `missing_audio_language`; paginate |
 | POST   | `/api/reclassify` | re-run classification across all libraries from stored data (no re-probe) |
+| POST   | `/api/enrich` | look titles up against the configured metadata providers (`?force=true` to re-query cached ones) |
 | GET    | `/api/items/{id}` | full item incl. files + `video_tracks` / `audio_tracks` / `subtitle_tracks` |
 | POST   | `/api/items/{id}/identify` | attach `imdb_id` / `tmdb_id` / `tvdb_id` / `anidb_id` / `guid` / `classification` |
 | POST   | `/api/items/{id}/classification` | override label (`anime`/`tv`/`movie`) |
@@ -354,6 +355,36 @@ a drive migration shuffles things.
 Per-item manual override (POST `/api/items/{id}/classification`) is sticky and
 always wins. `POST /api/reclassify` re-runs classification across the whole
 library from already-stored data, without re-probing any files.
+
+## Metadata providers
+
+Off by default. Enable them when local evidence isn't enough — and often it
+isn't: **an English-dubbed anime with no Japanese audio track and no fansub
+tag is indistinguishable from a western cartoon on disk.** That's exactly the
+title that ends up misfiled and stays undetected. Providers close that gap.
+
+```yaml
+providers:
+  enabled: true
+  anilist: { enabled: true }                      # no API key required
+  tmdb:    { enabled: true, api_key: "..." }      # or MI_PROVIDERS__TMDB__API_KEY
+  tvdb:    { enabled: true, api_key: "..." }      # or MI_PROVIDERS__TVDB__API_KEY
+```
+
+| Provider | Key? | What it's for |
+|---|---|---|
+| **AniList** | none | The anime oracle. Indexes *only* anime, so a hit is the signal and a miss is meaningful. Rejects the live-action remakes by checking the year — Netflix's 2023 *One Piece* is not the 1999 anime. |
+| **TMDB** | free | Movies + TV. Supplies `origin_country`, genres, and the **IMDB id** (IMDB has no free public API, so this is how you get it). The only provider that can say *"animated, but explicitly not anime"* — i.e. a western cartoon. |
+| **TVDB** | yes | Series identity; tags anime with an explicit `Anime` genre. Corroboration. |
+
+Results are cached per title (`cache_ttl_days`, default 30) — including
+misses — so a stable library re-scans with no network traffic. AniList allows
+30 requests/minute and is throttled accordingly. **A provider being down,
+slow, or rate-limiting can never fail a scan**: it degrades to offline
+behaviour and logs.
+
+Providers run automatically at the end of a scan when enabled, and on demand
+via `POST /api/enrich`.
 
 ## Subtitles
 

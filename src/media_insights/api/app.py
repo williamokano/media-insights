@@ -25,11 +25,13 @@ from media_insights.api.serializers import (
 from media_insights.config import AppConfig, LibraryConfig, resolve_config_path
 from media_insights.db import get_session, init_engine, run_migrations, session_scope
 from media_insights.events import Dispatcher
+from media_insights.matching.providers import enabled_providers
 from media_insights.models import Library, MediaFile, MediaItem, Season, Track
 from media_insights.query_params import parse_optional_bool, parse_optional_id
 from media_insights.scanner import (
     MediaWatcher,
     ScanScheduler,
+    enrich_all,
     get_or_create_library,
     manual_rescan_path,
     reclassify_all,
@@ -96,11 +98,21 @@ async def lifespan(app: FastAPI):
     state.scheduler = ScanScheduler(cfg)
     state.scheduler.start()
 
-    log.info(
-        "matching mode: offline only (.plexmatch + filename parsing) -- no TVDB/IMDB/TMDB "
-        "network calls are ever made; external IDs come from .plexmatch files or manual "
-        "identification via the UI/API"
-    )
+    if cfg.providers.enabled:
+        names = [p.name for p in enabled_providers(cfg.providers)]
+        log.info(
+            "matching mode: online providers enabled (%s) -- titles are looked up remotely "
+            "to identify them and to tell anime apart from western animation; results are "
+            "cached for %d days",
+            ", ".join(names) or "none configured",
+            cfg.providers.cache_ttl_days,
+        )
+    else:
+        log.info(
+            "matching mode: offline only (.plexmatch + filename parsing) -- no network calls "
+            "are made; external IDs come from .plexmatch files or manual identification. "
+            "Set providers.enabled=true to look titles up against AniList/TMDB/TVDB"
+        )
     log.info("media-insights API ready: http://%s:%d", cfg.server.host, cfg.server.port)
     try:
         yield
@@ -540,6 +552,16 @@ def create_app() -> FastAPI:
         every file on disk.
         """
         return reclassify_all(_require_config())
+
+    @app.post("/api/enrich")
+    def trigger_enrich(force: str | None = None) -> dict:
+        """Look titles up against the configured metadata providers.
+
+        Cached per title (see providers.cache_ttl_days), so this only queries
+        what it doesn't already know; `?force=true` re-queries everything.
+        Returns `enabled: false` when no provider is configured.
+        """
+        return enrich_all(_require_config(), force=parse_optional_bool(force))
 
     @app.post("/api/rescan")
     def rescan_path(body: dict) -> dict:

@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 from media_insights.matching.matcher import MatchResult
 from media_insights.matching.parser import ParsedTitle
+from media_insights.matching.providers.base import ProviderSignals
 from media_insights.models import MediaFile, Track
 
 LABELS = ("movie", "tv", "anime")
@@ -32,6 +33,14 @@ LABELS = ("movie", "tv", "anime")
 # any actual evidence outvotes the folder a title happens to sit in. See the
 # module docstring for why this matters.
 _HINT_WEIGHT = 0.15
+
+# Evidence from an online metadata provider. Deliberately the strongest
+# signals available: a provider knows what a title *is*, which local file
+# evidence often cannot establish at all (an English-dubbed anime with no
+# Japanese audio and no fansub tag looks exactly like a western cartoon).
+_PROVIDER_ANIME = 0.7
+_PROVIDER_NOT_ANIME = 0.4  # e.g. TMDB: animated, but not Japanese -> a western cartoon
+_PROVIDER_KIND = 0.6  # provider says movie vs series
 
 # Evidence from external IDs.
 _ANIDB_ID = 0.6
@@ -113,6 +122,46 @@ def _has_non_japanese_subs(subtitle_languages: Iterable[str]) -> bool:
     return any(not _is_japanese(lang) for lang in langs)
 
 
+def _apply_provider_signals(
+    scores: dict[str, float],
+    reasons: dict[str, list[str]],
+    provider: ProviderSignals | None,
+) -> None:
+    """Weigh what an online metadata provider said, if one was consulted.
+
+    This is what makes an English-dubbed anime -- no Japanese audio, no fansub
+    tag, nothing locally to go on -- detectable at all. It's also what stops a
+    western cartoon being called anime: `is_anime=False` is a real answer, not
+    the absence of one.
+    """
+    if provider is None:
+        return
+
+    origin = f" ({provider.origin_country})" if provider.origin_country else ""
+
+    if provider.is_anime is True:
+        scores["anime"] += _PROVIDER_ANIME
+        reasons["anime"].append(f"{provider.source} identifies this as anime{origin}")
+    elif provider.is_anime is False:
+        # Not anime, per a provider that would know. Push toward live-action /
+        # western-animation instead of merely withholding the anime bonus.
+        scores["tv"] += _PROVIDER_NOT_ANIME
+        scores["movie"] += _PROVIDER_NOT_ANIME
+        reasons["tv"].append(f"{provider.source} says this is not anime{origin}")
+        reasons["movie"].append(f"{provider.source} says this is not anime{origin}")
+
+    if provider.kind == "movie":
+        scores["movie"] += _PROVIDER_KIND
+        reasons["movie"].append(f"{provider.source} lists this as a film")
+    elif provider.kind == "show":
+        # A series: tv and anime are both series, so this can't discriminate
+        # between them -- it only rules out `movie`.
+        scores["tv"] += _PROVIDER_KIND
+        scores["anime"] += _PROVIDER_KIND
+        reasons["tv"].append(f"{provider.source} lists this as a series")
+        reasons["anime"].append(f"{provider.source} lists this as a series")
+
+
 def classify(
     match: MatchResult,
     files: list[MediaFile],
@@ -120,11 +169,15 @@ def classify(
     parsed: ParsedTitle | None = None,
     raw_name: str | None = None,
     manual_override: bool = False,
+    provider: ProviderSignals | None = None,
 ) -> Classification:
     """Return the best label + confidence + reasons for the title.
 
     `parsed`/`raw_name` come from a representative file of the title and feed
     the release-name signals (fansub groups, guessit's anime flag).
+    `provider` is what an online metadata source said, when one is enabled --
+    the strongest signal available, since it can identify titles whose files
+    carry no usable evidence at all.
     """
     # Only the *primary* audio of each file counts as evidence -- a Japanese
     # dub buried among five other dubs says nothing about a show's origin.
@@ -136,6 +189,8 @@ def classify(
 
     hint = match.library_kind_hint
     hint_label = {"movie": "movie", "tv": "tv", "anime": "anime"}.get(hint)
+
+    _apply_provider_signals(scores, reasons, provider)
 
     if match.kind == "movie":
         scores["movie"] += _PARSED_MOVIE

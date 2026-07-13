@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from media_insights.scanner.scheduler import ScanScheduler
 from media_insights.scanner.service import (
+    enrich_all,
     get_or_create_library,
     handle_missing_path,
     manual_rescan_path,
@@ -16,6 +17,7 @@ from media_insights.scanner.watcher import MediaWatcher
 __all__ = [
     "MediaWatcher",
     "ScanScheduler",
+    "enrich_all",
     "get_or_create_library",
     "handle_missing_path",
     "manual_rescan_path",

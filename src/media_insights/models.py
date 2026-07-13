@@ -67,10 +67,23 @@ class MediaItem(Base):
     tvdb_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     anidb_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
+    anilist_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+
     classification_label: Mapped[str | None] = mapped_column(String(16), nullable=True)
     classification_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     classification_reasons: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     classification_override: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # What an online metadata provider said about this title. provider_checked_at
+    # doubles as the cache key: it's set even when nothing was found, so a title
+    # that isn't in any provider's database isn't re-queried on every scan.
+    provider_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    provider_is_anime: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    provider_origin_country: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    provider_genres: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    provider_checked_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(

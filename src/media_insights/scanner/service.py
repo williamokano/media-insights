@@ -27,6 +27,7 @@ from media_insights.discovery.walker import find_nearest_plexmatch
 from media_insights.events import bus
 from media_insights.matching.matcher import MatchResult, match_observation
 from media_insights.matching.parser import parse as parse_title
+from media_insights.matching.providers import ProviderSignals, enabled_providers, lookup_all
 from media_insights.models import (
     Library,
     MediaFile,
@@ -537,11 +538,35 @@ def _classification_snapshot(item: MediaItem) -> dict:
     }
 
 
+def _stored_provider_signals(item: MediaItem) -> ProviderSignals | None:
+    """Rebuild the provider's answer from what was persisted on the item.
+
+    Provider lookups are cached on the item itself, so reclassification never
+    needs the network -- it replays the answer we already have.
+    """
+    if not item.provider_source:
+        return None
+    return ProviderSignals(
+        source=item.provider_source,
+        title=item.title,
+        year=item.year,
+        kind=item.kind,
+        is_anime=item.provider_is_anime,
+        origin_country=item.provider_origin_country,
+        genres=list(item.provider_genres or []),
+        imdb_id=item.imdb_id,
+        tmdb_id=item.tmdb_id,
+        tvdb_id=item.tvdb_id,
+        anilist_id=item.anilist_id,
+    )
+
+
 def _reclassify_item(session: Session, library: Library, item: MediaItem) -> bool:
     """Re-run classification for one item from data already in the database.
 
-    Everything classify() needs -- tracks, files, title -- is already stored,
-    so this never touches the disk. Returns True if the label actually moved.
+    Everything classify() needs -- tracks, files, title, and any cached
+    provider answer -- is already stored, so this never touches the disk or
+    the network. Returns True if the label actually moved.
     """
     if item.classification_override:
         return False  # a manual verdict always wins
@@ -571,6 +596,7 @@ def _reclassify_item(session: Session, library: Library, item: MediaItem) -> boo
         parsed=parsed,
         raw_name=raw_name,
         manual_override=item.classification_override,
+        provider=_stored_provider_signals(item),
     )
 
     changed = result.label != item.classification_label
@@ -633,10 +659,131 @@ def reclassify_all(cfg: AppConfig) -> dict[str, Any]:
     return {"items": total, "relabelled": len(changed), "changes": changed}
 
 
+def _needs_enrichment(item: MediaItem, ttl: dt.timedelta, force: bool) -> bool:
+    if force:
+        return True
+    if item.provider_checked_at is None:
+        return True
+    checked = item.provider_checked_at
+    if checked.tzinfo is None:  # SQLite hands back naive datetimes
+        checked = checked.replace(tzinfo=dt.UTC)
+    return (dt.datetime.now(dt.UTC) - checked) > ttl
+
+
+def _store_provider_signals(item: MediaItem, signals: ProviderSignals | None) -> None:
+    """Persist a provider's answer -- including a miss.
+
+    provider_checked_at is set even when nothing was found, so a title that
+    isn't in any provider's database doesn't get re-queried on every scan.
+    AniList allows only 30 requests/minute, so this matters.
+    """
+    item.provider_checked_at = dt.datetime.now(dt.UTC)
+    if signals is None:
+        item.provider_source = None
+        item.provider_is_anime = None
+        item.provider_origin_country = None
+        item.provider_genres = None
+        return
+
+    item.provider_source = signals.source
+    item.provider_is_anime = signals.is_anime
+    item.provider_origin_country = signals.origin_country
+    item.provider_genres = list(signals.genres) if signals.genres else None
+
+    # Providers also resolve identity, which is what drains the unmatched queue.
+    if signals.imdb_id and not item.imdb_id:
+        item.imdb_id = signals.imdb_id
+    if signals.tmdb_id and not item.tmdb_id:
+        item.tmdb_id = signals.tmdb_id
+    if signals.tvdb_id and not item.tvdb_id:
+        item.tvdb_id = signals.tvdb_id
+    if signals.anilist_id and not item.anilist_id:
+        item.anilist_id = signals.anilist_id
+    if (signals.imdb_id or signals.tmdb_id or signals.tvdb_id) and item.match_status != "manual":
+        item.match_status = "matched"
+
+
+def enrich_all(cfg: AppConfig, *, force: bool = False) -> dict[str, Any]:
+    """Ask the configured metadata providers about titles we don't know yet.
+
+    This is what identifies titles whose files carry no usable evidence -- an
+    English-dubbed anime with no Japanese audio track and no fansub tag is
+    indistinguishable from a western cartoon locally, and is exactly the sort
+    of title that ends up misfiled and undetected.
+
+    Network calls happen *outside* any open transaction, and each item's
+    result is written in its own short transaction: a provider stalling for
+    ten seconds must not hold SQLite's single write lock for ten seconds.
+    """
+    _ensure_db(cfg)
+    providers = enabled_providers(cfg.providers)
+    if not providers:
+        log.info("enrich: no providers enabled (providers.enabled=false); nothing to do")
+        return {"enabled": False, "examined": 0, "enriched": 0, "relabelled": 0}
+
+    ttl = dt.timedelta(days=cfg.providers.cache_ttl_days)
+    log.info(
+        "enrich started: providers=%s ttl=%dd force=%s",
+        [p.name for p in providers], cfg.providers.cache_ttl_days, force,
+    )
+
+    # Snapshot the work list first, so the network calls below run with no
+    # transaction open.
+    with session_scope() as session:
+        todo = [
+            (item.id, item.title, item.year, item.kind)
+            for library in session.query(Library).order_by(Library.name).all()
+            for item in library.items
+            if _needs_enrichment(item, ttl, force)
+        ]
+
+    enriched = 0
+    relabelled = 0
+    for item_id, title, year, kind in todo:
+        signals = lookup_all(providers, title, year, kind)  # network; no txn held
+        with session_scope() as session:
+            item = session.get(MediaItem, item_id)
+            if item is None:
+                continue  # deleted mid-run
+            _store_provider_signals(item, signals)
+            if signals is not None:
+                enriched += 1
+                log.info(
+                    "provider hit: %r -> %s (is_anime=%s origin=%s)",
+                    title, signals.source, signals.is_anime, signals.origin_country,
+                )
+            else:
+                log.debug("provider miss: %r (not found by any provider)", title)
+            library = session.get(Library, item.library_id)
+            if library is not None and _reclassify_item(session, library, item):
+                relabelled += 1
+
+    log.info(
+        "enrich finished: examined=%d enriched=%d relabelled=%d",
+        len(todo), enriched, relabelled,
+    )
+    return {
+        "enabled": True,
+        "providers": [p.name for p in providers],
+        "examined": len(todo),
+        "enriched": enriched,
+        "relabelled": relabelled,
+    }
+
+
 def scan_all(cfg: AppConfig, *, force: bool = False, trigger: str = "manual") -> list[dict]:
     _ensure_db(cfg)
     log.info("deep scan started: trigger=%s libraries=%d", trigger, len(cfg.libraries))
     results = [scan_library(cfg, lib, force=force, trigger=trigger) for lib in cfg.libraries]
+    if cfg.providers.enabled:
+        # Enrichment runs after the whole scan, not per file: it's per-title,
+        # network-bound and rate-limited, and cached results mean a stable
+        # library re-scans without touching the network at all. It must never
+        # take the scan down with it.
+        try:
+            enrich_all(cfg)
+        except Exception:
+            log.exception("provider enrichment failed; the scan itself is unaffected")
     log.info("deep scan finished: trigger=%s libraries=%d", trigger, len(cfg.libraries))
     return results
 

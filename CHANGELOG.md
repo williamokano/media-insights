@@ -8,6 +8,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-13
+
+### Added
+
+- **Online metadata providers** (`providers.enabled: true`, off by default).
+  Local evidence has a hard ceiling: an English-dubbed anime with no Japanese
+  audio track and no fansub tag is *indistinguishable from a western cartoon*
+  on disk. That's precisely the title that ends up misfiled and stays
+  undetected, and no amount of reweighting local signals can fix it. Providers
+  close that gap, and fill in `imdb`/`tmdb`/`tvdb` IDs, draining the unmatched
+  queue.
+  - **AniList** — no API key required. It indexes *only* anime, so a hit is
+    itself the signal and a miss (western cartoons, live-action) is meaningful
+    too. Verified against the live API: *Avatar*, *Castlevania*, *Arcane* and
+    *Secret Level* correctly return nothing.
+  - **TMDB** — movies and TV; supplies `origin_country`, genres, and the
+    **IMDB id** (IMDB has no free public API, so this is the reliable way to
+    get it). It's also the only provider that can say *"animated, but
+    explicitly **not** anime"* — the western-cartoon answer AniList
+    structurally cannot give, since it only indexes anime.
+  - **TVDB** (v4) — series identity and its explicit `Anime` genre.
+  - **Live-action remakes are rejected by year.** AniList resolves "One Piece"
+    to the 1999 anime even when the file is Netflix's 2023 live-action series;
+    without a year check every such adaptation would be mislabelled anime.
+    Verified live: `One Piece (2023)` → not anime, `One Piece (1999)` → anime.
+    The same check correctly rejects *Rick and Morty* (2013), which really does
+    hit AniList — there's a 2021 Japanese anime short of it.
+  - Results are cached per title (`cache_ttl_days`, default 30), **including
+    misses**, so a stable library re-scans with no network traffic at all.
+    AniList's real limit is 30 requests/minute (confirmed from its
+    `x-ratelimit-limit` header) and is throttled accordingly, with `Retry-After`
+    honoured on 429.
+  - **A provider can never fail a scan.** Timeouts, connection errors, 5xx,
+    rate limits, malformed payloads, or a provider throwing outright all
+    degrade to "no metadata" plus a log line.
+- `POST /api/enrich` runs provider lookups on demand (`?force=true` re-queries
+  cached titles); enrichment also runs automatically at the end of a scan when
+  providers are enabled.
+- `MediaItem` gained `anilist_id` and the provider fields backing all of this
+  (`provider_source`, `provider_is_anime`, `provider_origin_country`,
+  `provider_genres`, `provider_checked_at`).
+
+### Changed
+
+- The startup log no longer claims network calls are *never* made — that
+  stopped being unconditionally true. It now states whether providers are on,
+  which ones, and how to enable them if they're not. Offline remains the
+  default.
+
 ## [0.1.0] - 2026-07-13
 
 ### Changed
@@ -280,7 +329,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (amd64/arm64) with `PUID`/`PGID` support,
   published to GHCR on tagged releases.
 
-[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/williamokano/media-insights/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/williamokano/media-insights/compare/v0.0.9...v0.1.0
 [0.0.9]: https://github.com/williamokano/media-insights/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/williamokano/media-insights/compare/v0.0.7...v0.0.8
