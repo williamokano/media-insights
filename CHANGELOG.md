@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-14
+
+### Fixed
+
+- **A long scan left every title unclassified until it finished.** Found on a
+  real 16 TB library: 65 titles indexed, all of them showing no classification,
+  because classification only ran *after* the entire file loop. On a library
+  that takes hours that means nothing is labelled for the whole scan — and if
+  the process restarts before the scan completes, nothing is ever labelled at
+  all. Titles are now classified as the scan progresses (every 200 files);
+  classification is pure database work, so this is cheap.
+
+### Added
+
+- `GET /api/items` now exposes what a provider actually said — `ids.anilist`
+  plus a `provider` block (`source`, `is_anime`, `origin_country`, `genres`,
+  `checked_at`). Provider data was being stored but was invisible through the
+  API, so there was no way to see *why* a title was classified the way it was,
+  or even whether a provider had been consulted at all.
+
 ## [0.2.2] - 2026-07-14
 
 ### Fixed
@@ -381,7 +401,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (amd64/arm64) with `PUID`/`PGID` support,
   published to GHCR on tagged releases.
 
-[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/williamokano/media-insights/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/williamokano/media-insights/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/williamokano/media-insights/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/williamokano/media-insights/compare/v0.1.0...v0.2.0

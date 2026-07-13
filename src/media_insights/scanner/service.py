@@ -40,6 +40,11 @@ from media_insights.probe import probe as probe_file
 
 log = logging.getLogger(__name__)
 
+# How often to classify mid-scan. Classification is database-only (no disk, no
+# network), so this is cheap; the point is that a long scan shouldn't leave
+# every title unlabelled until it finishes.
+_RECLASSIFY_EVERY_N_FILES = 200
+
 # One lock per library name, so a scheduled deep scan, a manual "Rescan"
 # click, and a watcher-triggered rescan of the *same* library queue up
 # instead of running concurrently. Different libraries still scan in
@@ -343,6 +348,20 @@ def scan_library(
                 summary["errors"] += 1
                 continue
             summary[outcome] = summary.get(outcome, 0) + 1
+
+            # Classify as we go, not only at the very end. A large library
+            # (tens of thousands of files) otherwise shows every title as
+            # unclassified for the entire duration of its first scan -- and if
+            # the process restarts before the scan completes, nothing ever gets
+            # classified at all. Reclassification is pure database work, so
+            # doing it periodically is cheap.
+            if summary["files_seen"] % _RECLASSIFY_EVERY_N_FILES == 0:
+                try:
+                    with session_scope() as session:
+                        _reclassify_library(session, _require_library(session, library_id))
+                except LibraryGoneError:
+                    log.info("library %s deleted mid-scan; stopping", lib.name)
+                    return _finish()
 
         try:
             with session_scope() as session:

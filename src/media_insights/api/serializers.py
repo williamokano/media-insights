@@ -39,6 +39,19 @@ def serialise_item(row: MediaItem, *, include_files: bool = False) -> dict[str, 
             "tmdb": row.tmdb_id,
             "tvdb": row.tvdb_id,
             "anidb": row.anidb_id,
+            "anilist": row.anilist_id,
+        },
+        # What an online provider said, when one is enabled. Without this there
+        # is no way to see *why* a title was classified the way it was, or even
+        # whether a provider was ever consulted.
+        "provider": {
+            "source": row.provider_source,
+            "is_anime": row.provider_is_anime,
+            "origin_country": row.provider_origin_country,
+            "genres": row.provider_genres or [],
+            "checked_at": (
+                row.provider_checked_at.isoformat() if row.provider_checked_at else None
+            ),
         },
         "classification": {
             "label": row.classification_label,
