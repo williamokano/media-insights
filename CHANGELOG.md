@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-14
+
+### Fixed
+
+- **A library declared in `config.yaml` was invisible until its first scan —
+  yet still blocked being re-added.** Library rows were only created in the
+  database when a scan first ran, but every listing (the `/libraries` page and
+  `GET /api/libraries`) reads database rows, while the duplicate check in
+  `POST /api/libraries` reads `config.yaml`. So a library added by hand-editing
+  the config file was real, unlistable, and unaddable: the UI showed nothing
+  while adding it returned `library 'X' already exists`. Configured libraries
+  now get their database row at startup, so what's configured and what's shown
+  are the same thing.
+- Re-adding a library that already exists **with the same path** no longer
+  dead-ends on a 409 — what the caller asked for is already true, so it
+  reconciles (ensuring the row exists) and returns the library with `200`.
+  A genuine conflict (same name, *different* path) still returns 409, and the
+  message now names the path the existing library points at, so it can be
+  acted on.
+
 ## [0.2.0] - 2026-07-13
 
 ### Added
@@ -329,7 +349,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (amd64/arm64) with `PUID`/`PGID` support,
   published to GHCR on tagged releases.
 
-[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/williamokano/media-insights/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/williamokano/media-insights/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/williamokano/media-insights/compare/v0.0.9...v0.1.0
 [0.0.9]: https://github.com/williamokano/media-insights/compare/v0.0.8...v0.0.9

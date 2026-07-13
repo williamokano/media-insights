@@ -78,6 +78,30 @@ def configure(cfg: AppConfig, config_path: str | Path | None = None) -> None:
     db_url = _db_url(cfg)
     init_engine(db_url)
     run_migrations(db_url)
+    _reconcile_configured_libraries(cfg)
+
+
+def _reconcile_configured_libraries(cfg: AppConfig) -> None:
+    """Give every library declared in config.yaml a DB row, immediately.
+
+    The listing endpoints read DB rows, but a library only got a row when a
+    scan first ran. So a library added by hand-editing config.yaml was
+    invisible in the UI and API until then -- while POST /api/libraries still
+    rejected it with "already exists" (that check reads config.yaml). The
+    library was real, unlistable, and unaddable: a dead end.
+
+    Creating the row up front costs nothing and makes what's configured and
+    what's shown the same thing.
+    """
+    if not cfg.libraries:
+        return
+    try:
+        with session_scope() as session:
+            for lib in cfg.libraries:
+                get_or_create_library(session, lib)
+    except Exception:
+        # Never let this stop the app from starting; scans reconcile anyway.
+        log.exception("could not reconcile configured libraries into the database")
 
 
 @asynccontextmanager
@@ -248,10 +272,32 @@ def create_app() -> FastAPI:
         return {"libraries": [serialise_library(r, state.config) for r in rows]}
 
     @app.post("/api/libraries", status_code=201)
-    def create_library(body: LibraryConfig) -> dict:
+    def create_library(body: LibraryConfig, response: Response) -> dict:
         cfg = _require_config()
         config_path = _require_config_path()
         _require_existing_dir(body.path)
+
+        existing = next((lib for lib in cfg.libraries if lib.name == body.name), None)
+        if existing is not None:
+            if existing.path != body.path:
+                raise HTTPException(
+                    409,
+                    f"library {body.name!r} already exists, pointing at {existing.path!r}. "
+                    f"Rename the new one, or edit the existing library to change its path.",
+                )
+            # Same name, same path: whatever the caller wanted is already true.
+            # Rather than dead-end them with a conflict, make sure it's actually
+            # present in the database (it may only have existed in config.yaml)
+            # and hand it back. 200, not 201 -- nothing was created.
+            with session_scope() as session:
+                row = get_or_create_library(session, body)
+                result = serialise_library(row, cfg)
+            if state.watcher:
+                state.watcher.install_library(body.path)
+            _background_scan(cfg, body)
+            response.status_code = 200
+            return result
+
         try:
             config_store.add_library(cfg, config_path, body)
         except config_store.LibraryExistsError as exc:
