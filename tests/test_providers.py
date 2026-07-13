@@ -170,6 +170,49 @@ def test_tmdb_no_results(monkeypatch) -> None:
     assert TmdbProvider("key").lookup("Nonexistent", None, "show") is None
 
 
+def test_tmdb_v3_api_key_goes_in_the_query_string(monkeypatch) -> None:
+    seen: dict = {}
+
+    def handler(method, url, **kwargs):
+        seen.update(kwargs)
+        return _json_response({"results": []})
+
+    _stub_request(monkeypatch, handler)
+    TmdbProvider("abc123def456").lookup("X", None, "show")
+    assert seen["params"]["api_key"] == "abc123def456"
+    assert not seen["headers"].get("Authorization")
+
+
+def test_tmdb_v4_read_access_token_goes_in_the_bearer_header(monkeypatch) -> None:
+    """TMDB's settings page shows the v4 "API Read Access Token" (a JWT) most
+    prominently, so it's the credential people actually copy -- but passing it
+    as ?api_key= 401s on every call, which fails soft and looks like "no
+    metadata found" rather than "your key is wrong"."""
+    seen: dict = {}
+
+    def handler(method, url, **kwargs):
+        seen.update(kwargs)
+        return _json_response({"results": []})
+
+    token = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJ4In0.signature"
+    _stub_request(monkeypatch, handler)
+    TmdbProvider(token).lookup("X", None, "show")
+    assert seen["headers"]["Authorization"] == f"Bearer {token}"
+    assert "api_key" not in seen["params"]
+
+
+def test_tmdb_check_reports_a_bad_credential(monkeypatch) -> None:
+    _stub_request(monkeypatch, lambda *a, **k: _json_response({"status_message": "invalid"}, 401))
+    error = TmdbProvider("bad").check()
+    assert error is not None
+    assert "api key (v3)" in error
+
+
+def test_tmdb_check_passes_with_a_good_credential(monkeypatch) -> None:
+    _stub_request(monkeypatch, lambda *a, **k: _json_response({"images": {}}))
+    assert TmdbProvider("good").check() is None
+
+
 # --------------------------------------------------------------------------
 # TVDB
 # --------------------------------------------------------------------------
@@ -304,3 +347,32 @@ def test_lookup_all_first_opinion_on_is_anime_wins() -> None:
     merged = lookup_all([Authoritative(), Vaguer()], "Frieren", 2023, "show")  # type: ignore[list-item]
     assert merged is not None
     assert merged.is_anime is True
+
+
+# --------------------------------------------------------------------------
+# check_providers: make a wrong key *visible*
+# --------------------------------------------------------------------------
+
+
+def test_check_providers_reports_each_provider(monkeypatch) -> None:
+    from media_insights.config import AniListConfig, ProvidersConfig, TmdbConfig
+    from media_insights.matching.providers import check_providers
+
+    _stub_request(monkeypatch, lambda *a, **k: _json_response({"status_message": "invalid"}, 401))
+    cfg = ProvidersConfig(
+        enabled=True,
+        anilist=AniListConfig(enabled=False),
+        tmdb=TmdbConfig(enabled=True, api_key="bad-key"),
+    )
+    status = check_providers(cfg)
+    assert status["enabled"] is True
+    tmdb = next(p for p in status["providers"] if p["name"] == "tmdb")
+    assert tmdb["ok"] is False
+    assert tmdb["error"]
+
+
+def test_check_providers_when_disabled() -> None:
+    from media_insights.config import ProvidersConfig
+    from media_insights.matching.providers import check_providers
+
+    assert check_providers(ProvidersConfig(enabled=False)) == {"enabled": False, "providers": []}

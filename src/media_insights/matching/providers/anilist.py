@@ -53,6 +53,19 @@ class AniListProvider:
         self._timeout = timeout
         self._limiter = RateLimiter(_RATE_LIMIT_PER_MINUTE)
 
+    def check(self) -> str | None:
+        """Verify the endpoint is reachable. No credential to get wrong."""
+        payload = request_json(
+            "POST",
+            ENDPOINT,
+            provider=self.name,
+            timeout=self._timeout,
+            limiter=self._limiter,
+            json={"query": "{ Media(id: 1) { id } }"},
+            headers={"Content-Type": "application/json"},
+        )
+        return None if payload else "AniList is unreachable"
+
     def lookup(self, title: str, year: int | None, kind: str | None) -> ProviderSignals | None:
         payload = request_json(
             "POST",

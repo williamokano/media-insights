@@ -30,23 +30,52 @@ _ANIMATION_GENRE_ID = 16
 _ANIMATION_GENRE_NAME = "animation"
 
 
+def _is_read_access_token(credential: str) -> bool:
+    """TMDB issues two different credentials and shows the wrong one first.
+
+    - the v3 "API Key": a short hex string, passed as ?api_key=...
+    - the v4 "API Read Access Token": a JWT, which must be sent as
+      `Authorization: Bearer ...` and 401s if passed as api_key.
+
+    The settings page presents the read access token most prominently, so it's
+    the one people actually copy. Accept either rather than silently 401ing on
+    every lookup and degrading to "no metadata".
+    """
+    return credential.startswith("eyJ") or credential.count(".") == 2
+
+
 class TmdbProvider:
     name = "tmdb"
 
     def __init__(self, api_key: str, timeout: float = 10.0) -> None:
-        self._api_key = api_key
+        self._credential = api_key.strip()
+        self._use_bearer = _is_read_access_token(self._credential)
         self._timeout = timeout
         self._limiter = RateLimiter(_RATE_LIMIT_PER_MINUTE)
 
     def _get(self, path: str, **params: object) -> dict | None:
+        headers: dict[str, str] = {}
+        if self._use_bearer:
+            headers["Authorization"] = f"Bearer {self._credential}"
+        else:
+            params = {"api_key": self._credential, **params}
         return request_json(
             "GET",
             f"{BASE}{path}",
             provider=self.name,
             timeout=self._timeout,
             limiter=self._limiter,
-            params={"api_key": self._api_key, **params},
+            params=params,
+            headers=headers,
         )
+
+    def check(self) -> str | None:
+        """Verify the credential actually works. Returns an error, or None if OK."""
+        payload = self._get("/configuration")
+        if payload is None:
+            kind = "read access token (v4)" if self._use_bearer else "api key (v3)"
+            return f"TMDB rejected the {kind} (or is unreachable)"
+        return None
 
     def lookup(self, title: str, year: int | None, kind: str | None) -> ProviderSignals | None:
         media_type = "movie" if kind == "movie" else "tv"

@@ -92,11 +92,17 @@ providers:
   # It's also what distinguishes "animated but NOT anime" (Rick and Morty,
   # Arcane) from actual anime. Free key: https://www.themoviedb.org/settings/api
   # Can also be set via MI_PROVIDERS__TMDB__API_KEY to keep it out of this file.
+  #
+  # Either TMDB credential works and is auto-detected:
+  #   - the "API Key" (v3): a short hex string
+  #   - the "API Read Access Token" (v4): a long token starting with eyJ...
+  # Check it actually works with:  curl -X GET localhost:8765/api/providers
   tmdb:
     enabled: false
     api_key: ""
 
-  # TVDB v4. Series-focused; tags anime with an explicit `Anime` genre.
+  # TVDB v4. Optional -- AniList + TMDB already cover anime detection and
+  # give you the IMDB id, so leaving this off costs you only the tvdb_id.
   # Key: https://thetvdb.com/api-information  (MI_PROVIDERS__TVDB__API_KEY)
   tvdb:
     enabled: false

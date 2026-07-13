@@ -47,3 +47,11 @@ class Provider(Protocol):
 
     def lookup(self, title: str, year: int | None, kind: str | None) -> ProviderSignals | None:
         """Best candidate for this title, or None when nothing matches."""
+
+    def check(self) -> str | None:
+        """Verify credentials/reachability. Returns an error message, or None if OK.
+
+        Providers fail soft by design -- a bad API key just means "no metadata"
+        and a log line, which is safe but silent. This exists so a
+        misconfigured key can be *seen* rather than quietly doing nothing.
+        """

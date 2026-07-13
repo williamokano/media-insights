@@ -257,6 +257,7 @@ media-insights version
 | DELETE | `/api/libraries/{id}` | stop scanning/watching (data kept); add `?purge=true` to also delete its indexed data |
 | GET    | `/api/items` | filter by library / classification / unmatched / `misfiled` / `missing_subtitle_language` / `missing_audio_language`; paginate |
 | POST   | `/api/reclassify` | re-run classification across all libraries from stored data (no re-probe) |
+| GET    | `/api/providers` | whether each configured provider actually works (verifies API keys) |
 | POST   | `/api/enrich` | look titles up against the configured metadata providers (`?force=true` to re-query cached ones) |
 | GET    | `/api/items/{id}` | full item incl. files + `video_tracks` / `audio_tracks` / `subtitle_tracks` |
 | POST   | `/api/items/{id}/identify` | attach `imdb_id` / `tmdb_id` / `tvdb_id` / `anidb_id` / `guid` / `classification` |
@@ -375,7 +376,20 @@ providers:
 |---|---|---|
 | **AniList** | none | The anime oracle. Indexes *only* anime, so a hit is the signal and a miss is meaningful. Rejects the live-action remakes by checking the year — Netflix's 2023 *One Piece* is not the 1999 anime. |
 | **TMDB** | free | Movies + TV. Supplies `origin_country`, genres, and the **IMDB id** (IMDB has no free public API, so this is how you get it). The only provider that can say *"animated, but explicitly not anime"* — i.e. a western cartoon. |
-| **TVDB** | yes | Series identity; tags anime with an explicit `Anime` genre. Corroboration. |
+| **TVDB** | gated | Optional. Series identity + an explicit `Anime` genre. **AniList + TMDB already cover anime detection and give you the IMDB id**, so leaving TVDB off costs you only the `tvdb_id`. |
+
+**AniList + TMDB is the recommended pair** — between them you get anime detection, western-cartoon rejection, and IMDB/TMDB IDs, with only one (free) key to obtain.
+
+TMDB issues two different credentials and **either works** — they're auto-detected:
+- the **API Key** (v3), a short hex string, and
+- the **API Read Access Token** (v4), a long `eyJ...` token.
+
+Passing a v4 token where a v3 key is expected returns 401, and since providers fail *soft*, that would look like "no metadata found" rather than "your key is wrong". So check it:
+
+```bash
+curl http://localhost:8765/api/providers
+# {"enabled": true, "providers": [{"name": "tmdb", "ok": true, "error": null}]}
+```
 
 Results are cached per title (`cache_ttl_days`, default 30) — including
 misses — so a stable library re-scans with no network traffic. AniList allows

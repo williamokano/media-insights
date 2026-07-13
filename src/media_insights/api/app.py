@@ -25,7 +25,7 @@ from media_insights.api.serializers import (
 from media_insights.config import AppConfig, LibraryConfig, resolve_config_path
 from media_insights.db import get_session, init_engine, run_migrations, session_scope
 from media_insights.events import Dispatcher
-from media_insights.matching.providers import enabled_providers
+from media_insights.matching.providers import check_providers, enabled_providers
 from media_insights.models import Library, MediaFile, MediaItem, Season, Track
 from media_insights.query_params import parse_optional_bool, parse_optional_id
 from media_insights.scanner import (
@@ -598,6 +598,16 @@ def create_app() -> FastAPI:
         every file on disk.
         """
         return reclassify_all(_require_config())
+
+    @app.get("/api/providers")
+    def providers_status() -> dict:
+        """Whether each configured provider actually works.
+
+        Providers fail soft during a scan (a bad key just means "no metadata"),
+        so a misconfigured key is otherwise invisible. This calls each one and
+        tells you.
+        """
+        return check_providers(_require_config().providers)
 
     @app.post("/api/enrich")
     def trigger_enrich(force: str | None = None) -> dict:

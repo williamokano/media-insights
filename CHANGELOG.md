@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-14
+
+### Fixed
+
+- **TMDB's "API Read Access Token" (v4) silently failed.** TMDB issues two
+  different credentials and its settings page shows the v4 token — a long
+  `eyJ...` JWT — most prominently, so it's the one people actually copy. But
+  it has to be sent as `Authorization: Bearer`, and passing it as `?api_key=`
+  returns 401 (confirmed against the live API). Because providers fail *soft*
+  by design, that 401 looked exactly like "no metadata found" rather than
+  "your key is in the wrong place". Both credential forms are now accepted and
+  auto-detected.
+
+### Added
+
+- `GET /api/providers` — actually calls each configured provider and reports
+  whether it works. Failing soft is right for a scan (a provider outage must
+  never break indexing) but it makes a bad API key invisible; this makes it
+  visible:
+
+  ```json
+  {"enabled": true, "providers": [{"name": "tmdb", "ok": false,
+   "error": "TMDB rejected the api key (v3) (or is unreachable)"}]}
+  ```
+
+### Changed
+
+- Documented that **AniList + TMDB is the recommended pair**: between them you
+  get anime detection, western-cartoon rejection, and the IMDB id, with only
+  one (free) key to obtain. TVDB is genuinely optional — it's gated behind an
+  approval process, and skipping it costs you only the `tvdb_id`.
+
 ## [0.2.1] - 2026-07-14
 
 ### Fixed
@@ -349,7 +381,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (amd64/arm64) with `PUID`/`PGID` support,
   published to GHCR on tagged releases.
 
-[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/williamokano/media-insights/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/williamokano/media-insights/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/williamokano/media-insights/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/williamokano/media-insights/compare/v0.0.9...v0.1.0

@@ -29,9 +29,32 @@ __all__ = [
     "ProviderSignals",
     "TmdbProvider",
     "TvdbProvider",
+    "check_providers",
     "enabled_providers",
     "lookup_all",
 ]
+
+
+def check_providers(cfg: ProvidersConfig) -> dict:
+    """Actually call each enabled provider and report whether it works.
+
+    Providers fail soft, which is right for a scan but means a wrong API key
+    is invisible: lookups just quietly return nothing. This makes the failure
+    observable.
+    """
+    if not cfg.enabled:
+        return {"enabled": False, "providers": []}
+
+    results = []
+    for provider in enabled_providers(cfg):
+        try:
+            error = provider.check()
+        except Exception as exc:  # a provider must never take the endpoint down
+            error = f"{type(exc).__name__}: {exc}"
+        results.append({"name": provider.name, "ok": error is None, "error": error})
+        if error:
+            log.warning("provider %s is not working: %s", provider.name, error)
+    return {"enabled": True, "providers": results}
 
 
 def enabled_providers(cfg: ProvidersConfig) -> list[Provider]:

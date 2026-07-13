@@ -62,6 +62,12 @@ class TvdbProvider:
                 self._token = self._login()
             return self._token
 
+    def check(self) -> str | None:
+        """Verify the api key can actually log in."""
+        with self._lock:
+            self._token = None  # force a fresh login rather than trusting a cached token
+        return None if self._bearer() else "TVDB rejected the api key (or is unreachable)"
+
     def lookup(self, title: str, year: int | None, kind: str | None) -> ProviderSignals | None:
         token = self._bearer()
         if not token:
