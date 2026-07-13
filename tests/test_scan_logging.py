@@ -81,7 +81,7 @@ def test_startup_logs_offline_matching_disclaimer(tmp_path, caplog) -> None:
 
     from media_insights.api import configure, create_app
     from media_insights.config import AppConfig, DatabaseConfig, ScheduleConfig, WatcherConfig
-    from media_insights.db import ensure_schema, init_engine
+    from media_insights.db import init_engine, run_migrations
 
     db_url = f"sqlite:///{tmp_path}/test.db"
     cfg = AppConfig(
@@ -91,7 +91,7 @@ def test_startup_logs_offline_matching_disclaimer(tmp_path, caplog) -> None:
         schedule=ScheduleConfig(enabled=False),
     )
     init_engine(db_url)
-    ensure_schema()
+    run_migrations(db_url)
     configure(cfg, tmp_path / "config.yaml")
     app = create_app()
 
@@ -104,13 +104,12 @@ def test_startup_logs_offline_matching_disclaimer(tmp_path, caplog) -> None:
 
 def test_dispatcher_logs_why_events_are_skipped(tmp_path, caplog) -> None:
     from media_insights.config import AppConfig, DatabaseConfig
-    from media_insights.db import init_engine, reset_for_tests, session_scope
-    from media_insights.models import Base
+    from media_insights.db import init_engine, reset_for_tests, run_migrations, session_scope
 
     db_url = f"sqlite:///{tmp_path}/test.db"
     reset_for_tests()
-    eng = init_engine(db_url)
-    Base.metadata.create_all(eng)
+    init_engine(db_url)
+    run_migrations(db_url)
     cfg = AppConfig(config_dir=str(tmp_path), database=DatabaseConfig(url=db_url), webhooks=[])
 
     with session_scope() as session:

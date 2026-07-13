@@ -11,8 +11,7 @@ from pathlib import Path
 import pytest
 
 from media_insights.config import AppConfig, LibraryConfig
-from media_insights.db import init_engine, reset_for_tests
-from media_insights.models import Base
+from media_insights.db import init_engine, reset_for_tests, run_migrations
 
 
 @pytest.fixture(scope="session")
@@ -66,7 +65,7 @@ def scratch_config(tmp_path: Path) -> AppConfig:
     )
     reset_for_tests()
     init_engine(cfg.database.url)
-    Base.metadata.create_all(init_engine(cfg.database.url).connect())
+    run_migrations(cfg.database.url)
     return cfg
 
 

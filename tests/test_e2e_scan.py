@@ -74,15 +74,13 @@ def _config_for(lib) -> object:
         ScheduleConfig,
         WatcherConfig,
     )
-    from media_insights.db import init_engine, reset_for_tests
-    from media_insights.models import Base
+    from media_insights.db import init_engine, reset_for_tests, run_migrations
 
     tmpdir = tempfile.mkdtemp(prefix="mi-e2e-")
     db_url = f"sqlite:///{tmpdir}/test.db"
     reset_for_tests()
-    eng = init_engine(db_url)
-    Base.metadata.drop_all(eng)
-    Base.metadata.create_all(eng)
+    init_engine(db_url)
+    run_migrations(db_url)
     return AppConfig(
         config_dir=tmpdir,
         data_dir=tmpdir,

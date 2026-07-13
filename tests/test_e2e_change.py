@@ -11,8 +11,8 @@ from media_insights.config import (
     ScheduleConfig,
     WatcherConfig,
 )
-from media_insights.db import init_engine, reset_for_tests, session_scope
-from media_insights.models import Base, ChangeEvent
+from media_insights.db import init_engine, reset_for_tests, run_migrations, session_scope
+from media_insights.models import ChangeEvent
 from media_insights.scanner import manual_rescan_path, scan_library
 from tests.fixtures.media_factory import rewrite_with_different_codec
 
@@ -22,9 +22,8 @@ def _config_for(lib) -> AppConfig:
     tmpdir = tempfile.mkdtemp(prefix="mi-e2e-")
     db_url = f"sqlite:///{tmpdir}/test.db"
     reset_for_tests()
-    eng = init_engine(db_url)
-    Base.metadata.drop_all(eng)
-    Base.metadata.create_all(eng)
+    init_engine(db_url)
+    run_migrations(db_url)
     return AppConfig(
         config_dir=tmpdir,
         data_dir=tmpdir,

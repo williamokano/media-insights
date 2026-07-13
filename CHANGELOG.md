@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-07-13
+
+### Fixed
+
+- Schema migrations were never actually run by the application. Alembic
+  scripts existed in the repo, but startup only ever called
+  `Base.metadata.create_all()`, which creates missing tables and then does
+  nothing else — it can't add a column to a table that already exists. The
+  moment a future release changed the schema, every already-running
+  deployment would start failing (`no such column`) with no recovery path
+  short of manually running Alembic inside the container. `run_migrations()`
+  is now called on every startup (API and CLI) and detects which of two
+  states a database is in: brand new (runs every migration from scratch) or
+  created before this fix (tables already exist, no `alembic_version`
+  table) — in which case it *stamps* the database as up to date instead of
+  replaying `CREATE TABLE` statements that would collide with what's
+  already there. Verified against a live container seeded with an old-style
+  database: it starts cleanly and serves requests immediately, no manual
+  steps required. Migration scripts also moved from a repo-root `alembic/`
+  directory into `src/media_insights/migrations/` so they're actually
+  bundled inside the installed package/Docker image, which they previously
+  were not.
+
 ## [0.0.6] - 2026-07-13
 
 ### Fixed
@@ -142,7 +165,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (amd64/arm64) with `PUID`/`PGID` support,
   published to GHCR on tagged releases.
 
-[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.0.6...HEAD
+[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.0.7...HEAD
+[0.0.7]: https://github.com/williamokano/media-insights/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/williamokano/media-insights/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/williamokano/media-insights/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/williamokano/media-insights/compare/v0.0.3...v0.0.4

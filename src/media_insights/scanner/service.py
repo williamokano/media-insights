@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from media_insights.classify import Classification, classify
 from media_insights.config import AppConfig, LibraryConfig
-from media_insights.db import ensure_schema, init_engine, session_scope
+from media_insights.db import init_engine, run_migrations, session_scope
 from media_insights.discovery import (
     FileObservation,
     FoundFile,
@@ -269,7 +269,7 @@ def _ensure_db(cfg: AppConfig) -> None:
     if not cfg.database.url:
         cfg.database.url = f"sqlite:///{cfg.config_dir}/media_insights.db"
     init_engine(cfg.database.url)
-    ensure_schema()
+    run_migrations(cfg.database.url)
 
 
 def scan_library(

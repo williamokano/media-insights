@@ -16,7 +16,7 @@ def _setup_app() -> TestClient:
         ScheduleConfig,
         WatcherConfig,
     )
-    from media_insights.db import ensure_schema, init_engine
+    from media_insights.db import init_engine, run_migrations
 
     tmpdir = tempfile.mkdtemp(prefix="mi-api-")
     db_url = f"sqlite:///{tmpdir}/test.db"
@@ -31,7 +31,7 @@ def _setup_app() -> TestClient:
         libraries=[],
     )
     init_engine(db_url)
-    ensure_schema()
+    run_migrations(db_url)
     configure(cfg)
     return TestClient(create_app())
 

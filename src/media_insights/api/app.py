@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from media_insights import config_store
 from media_insights.api.serializers import serialise_file, serialise_item, serialise_library
 from media_insights.config import AppConfig, LibraryConfig, resolve_config_path
-from media_insights.db import ensure_schema, get_session, init_engine, session_scope
+from media_insights.db import get_session, init_engine, run_migrations, session_scope
 from media_insights.events import Dispatcher
 from media_insights.models import Library, MediaFile, MediaItem
 from media_insights.scanner import (
@@ -66,8 +66,9 @@ def configure(cfg: AppConfig, config_path: str | Path | None = None) -> None:
     """Wire config + DB + background services. Called once on startup."""
     state.config = cfg
     state.config_path = resolve_config_path(config_path)
-    init_engine(_db_url(cfg))
-    ensure_schema()
+    db_url = _db_url(cfg)
+    init_engine(db_url)
+    run_migrations(db_url)
 
 
 @asynccontextmanager

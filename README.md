@@ -377,9 +377,11 @@ database:
   url: postgresql+psycopg://user:pass@host/media_insights
 ```
 
-The schema is migrated via Alembic: `alembic upgrade head`. Migrations live
-in `alembic/versions/`. On startup the app calls `Base.metadata.create_all`
-as a safety net for fresh installs.
+The schema is managed via Alembic. The app runs migrations itself on every
+startup (API and CLI) — there's nothing to run by hand, and this includes
+upgrading an existing database when a new release adds or changes a table.
+Migration scripts live in `src/media_insights/migrations/versions/`, inside
+the package so they ship with the installed wheel and the Docker image.
 
 ## Architecture
 
@@ -388,6 +390,7 @@ src/media_insights/
   config.py            pydantic models; YAML + nested MI_* env overrides
   config_store.py      comment-preserving library CRUD writes to config.yaml
   db.py, models.py     SQLAlchemy 2.0 typed ORM, WAL pragmas
+  migrations/          Alembic env + versioned scripts, run on startup
   probe/               ffprobe + pymediainfo + normalize
   discovery/           walker, fingerprint, plexmatch, subtitles, grouping
   matching/            parser (guessit), matcher, providers (Protocol)

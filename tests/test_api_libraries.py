@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from media_insights.api import configure, create_app
 from media_insights.config import AppConfig, DatabaseConfig, ScheduleConfig, WatcherConfig
-from media_insights.db import ensure_schema, init_engine
+from media_insights.db import init_engine, run_migrations
 
 
 def _setup_app() -> tuple[TestClient, Path, Path, Path]:
@@ -41,7 +41,7 @@ def _setup_app() -> tuple[TestClient, Path, Path, Path]:
         libraries=[],
     )
     init_engine(db_url)
-    ensure_schema()
+    run_migrations(db_url)
     configure(cfg, config_path)
     return TestClient(create_app()), config_path, movies_dir, tv_dir
 
@@ -95,7 +95,7 @@ def test_create_library_when_config_file_does_not_exist_yet() -> None:
         libraries=[],
     )
     init_engine(db_url)
-    ensure_schema()
+    run_migrations(db_url)
     configure(cfg, config_path)
     client = TestClient(create_app())
 
@@ -122,7 +122,7 @@ def test_create_library_when_config_file_is_empty() -> None:
         libraries=[],
     )
     init_engine(db_url)
-    ensure_schema()
+    run_migrations(db_url)
     configure(cfg, config_path)
     client = TestClient(create_app())
 

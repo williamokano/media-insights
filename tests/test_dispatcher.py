@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from media_insights.config import AppConfig, DatabaseConfig, WebhookConfig
-from media_insights.db import init_engine, reset_for_tests, session_scope
+from media_insights.db import init_engine, reset_for_tests, run_migrations, session_scope
 from media_insights.events import Dispatcher, bus
-from media_insights.models import Base, ChangeEvent
+from media_insights.models import ChangeEvent
 
 
 def _setup(tmp_path, webhooks: list[WebhookConfig]) -> AppConfig:
     db_url = f"sqlite:///{tmp_path}/test.db"
     reset_for_tests()
-    eng = init_engine(db_url)
-    Base.metadata.create_all(eng)
+    init_engine(db_url)
+    run_migrations(db_url)
     return AppConfig(
         config_dir=str(tmp_path),
         database=DatabaseConfig(url=db_url),
