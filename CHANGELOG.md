@@ -8,6 +8,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-07-13
+
+### Fixed
+
+- `subtitle_summary` (the compact field shown on the item detail page and in
+  API responses) was computed once from ffprobe's embedded subtitle streams
+  *before* external `.srt`/`.ass` sidecars were attached, and never
+  recomputed. External subtitle tracks were correctly detected and stored
+  (visible in the full per-file `tracks` list) but silently missing from
+  this summary field — making it look like a file had no subtitles when it
+  actually had an external one. Now recomputed once, after both embedded
+  and external tracks are known.
+- `GET /api/items` (the list view) dropped `audio_summary`/`subtitle_summary`
+  and basic video info from every file entry, even though these are plain
+  columns that cost nothing extra to include — you had to hit
+  `/api/items/{id}` to see them. Now included in the list view too.
+- The dashboard's "Titles" card linked directly to `/api/items` (raw JSON)
+  because no browsable "all titles" HTML page existed. Added `/titles`: a
+  proper paginated, filterable (library/classification/unmatched) listing,
+  linked from the nav and the dashboard.
+
+### Added
+
+- The events list explains what **skipped** means (no webhook/exec hook
+  configured — not a failure; the underlying file change was still recorded)
+  directly in the UI, on both the dashboard's compact widget and the full
+  `/events` page, instead of showing an unexplained badge.
+- New title discovery and classification decisions are now logged at `INFO`
+  (`new title: 'X' (year) kind=... matched_via=...` /
+  `classified: 'X' as movie (confidence=...%, reasons=[...])`), only when
+  they happen or change — not spammed on every re-scan of a stable library.
+  Per-file match detail (what guessit/`.plexmatch` parsed out of a given
+  filename) logs at `DEBUG`.
+- A startup log line now states explicitly that matching is offline-only and
+  no TVDB/IMDB/TMDB network calls are ever made, to head off exactly that
+  question before it comes up.
+
 ## [0.0.5] - 2026-07-12
 
 ### Added
@@ -105,7 +142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (amd64/arm64) with `PUID`/`PGID` support,
   published to GHCR on tagged releases.
 
-[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.0.5...HEAD
+[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/williamokano/media-insights/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/williamokano/media-insights/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/williamokano/media-insights/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/williamokano/media-insights/compare/v0.0.2...v0.0.3

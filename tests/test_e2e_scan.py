@@ -47,6 +47,13 @@ def test_scan_anime_classified_correctly(tmp_anime) -> None:
         assert tracks
         langs = {t.language for t in tracks}
         assert "en" in langs
+        # subtitle_summary must include external sidecars too, not just
+        # ffprobe-embedded tracks -- this is the compact field the item
+        # detail page and API list view show, so a missing external track
+        # here means subtitles look absent even though they were found.
+        file = session.query(MediaFile).one()
+        assert file.subtitle_summary is not None
+        assert "en" in file.subtitle_summary
 
 
 def test_second_scan_is_idempotent(tmp_library) -> None:

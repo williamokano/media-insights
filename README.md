@@ -9,7 +9,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 ## Features
 
 - **Manage libraries from the UI or API — no restart needed.** Add, rename, or remove libraries from `/libraries` or `POST/PUT/DELETE /api/libraries`; changes write straight back into `config.yaml` (comments preserved) and the filesystem watcher picks up the new path immediately.
-- **Offline-first matching.** `.plexmatch` + folder-name parsing via [guessit] cover most real-world releases with no API keys. Pluggable `Provider` interface for TMDB/TVDB/AniList later.
+- **Offline-first matching — genuinely offline.** No network calls are ever made to TVDB, IMDB, TMDB, or any other metadata provider. Titles are matched via `.plexmatch` files or filename/folder parsing ([guessit]) only; external IDs shown in the UI came from a `.plexmatch` file or from you attaching them manually via `/unmatched` or `POST /api/items/{id}/identify`. A `Provider` interface exists for plugging in TMDB/TVDB/AniList later, but nothing implements it yet.
 - **Technical truth, normalized.** Every track (video / audio / subtitle, embedded or external sidecar) is its own row — so queries like *"files with no English subtitle"* or *"anything still x264"* are SQL, not file scanning. Episode numbers and titles are extracted per file.
 - **Scored classification.** Anime / TV / movie labels come with confidence and a human-readable list of reasons. Manual overrides always win.
 - **Unmatched queue.** Items without external IDs (and items guessit couldn't even name) land in `/unmatched` for one-click identification.
@@ -180,11 +180,24 @@ files (the common case on a re-scan) log at `DEBUG` so they don't drown out
 everything else — set `MI_LOG_LEVEL=DEBUG` (or `--verbose` on the CLI) to see
 every file, including the exact moment each one is being probed.
 
+Matching and classification are also logged: a newly-discovered title logs
+at `INFO` (`new title: 'Interstellar' (2014) kind=movie matched_via=guessit
+ids={...}`), and a title's classification changing logs at `INFO` with its
+full reasons (`classified: 'Interstellar' as movie (confidence=85%,
+reasons=[...])`) — but only the first time or when it actually changes, not
+on every re-scan. Per-file match detail (exactly what guessit or `.plexmatch`
+parsed out of a given filename) logs at `DEBUG`. **No network calls are ever
+made** to resolve titles — see "Offline-first matching" above — so there is
+no "called TVDB" log line to look for; `matched_via` will always be
+`plexmatch`, `guessit`, or `none (unmatched)`.
+
 If the `/events` page shows deliveries as **skipped**, that's expected until
 you configure at least one entry under `webhooks:` or `exec_hooks:` in
 `config.yaml` — the dispatcher logs this explicitly the first time it
 happens (`no webhooks/exec_hooks configured; marking N event(s) as
-skipped`), and successful deliveries are logged too.
+skipped`), and successful deliveries are logged too. It does not mean any
+files were ignored: every `file.added`/`file.changed` event you see was
+recorded correctly regardless of its delivery status.
 
 ## Managing libraries
 
@@ -252,8 +265,9 @@ media-insights version
 | POST   | `/api/scan` | trigger scan (`?library=Name` to scope) |
 | POST   | `/api/rescan` | body `{"path": "..."}` — single-path rescan |
 
-Web UI pages: `/dashboard`, `/libraries`, `/items/{id}`, `/unmatched`,
-`/events`, `/search`. OpenAPI docs at `/docs`.
+Web UI pages: `/dashboard`, `/libraries`, `/titles` (browsable, filterable
+list of every title — filter by library/classification/unmatched), `/items/{id}`,
+`/unmatched`, `/events`, `/search`. OpenAPI docs at `/docs`.
 
 ## Webhook payload
 

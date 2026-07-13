@@ -188,14 +188,13 @@ def _apply_probe(file: MediaFile, probe: ProbeResult, ffprobe_bin: str, fingerpr
         file.video_height = video.height
         file.video_dynamic_range = video.dynamic_range
 
-    audio_summary = ", ".join(
+    file.audio_summary = ", ".join(
         f"{t.language or 'und'}/{t.codec or '?'}" for t in probe.audio_tracks
     ) or None
-    sub_summary = ", ".join(
-        f"{t.language or 'und'}/{t.codec or '?'}" for t in probe.subtitle_tracks
-    ) or None
-    file.audio_summary = audio_summary
-    file.subtitle_summary = sub_summary
+    # subtitle_summary is computed later, in _refresh_subtitle_summary(), once
+    # external sidecars have been added too -- embedded-only here would drop
+    # every external .srt from the compact field shown in the UI/list view,
+    # even though the Track rows themselves are stored correctly.
 
     # Drop existing tracks; we'll re-add them
     file.tracks.clear()
@@ -251,6 +250,19 @@ def _add_sidecars(file: MediaFile, sidecars: Iterable) -> None:
 def _sidecar_codec(path: Path) -> str | None:
     suffix = path.suffix.lower().lstrip(".")
     return suffix or None
+
+
+def _refresh_subtitle_summary(file: MediaFile) -> None:
+    """Recompute subtitle_summary from every subtitle track (embedded + external).
+
+    Must run after both _apply_probe() and _add_sidecars(), otherwise external
+    .srt/.ass sidecars are silently missing from the compact summary field
+    even though their Track rows are stored correctly.
+    """
+    subs = [t for t in file.tracks if t.kind == "subtitle"]
+    file.subtitle_summary = ", ".join(
+        f"{t.language or 'und'}/{t.codec or '?'}" for t in subs
+    ) or None
 
 
 def _ensure_db(cfg: AppConfig) -> None:
@@ -349,9 +361,22 @@ def _process_file(
 ) -> str:
     obs = FileObservation(found=found)
     match = match_observation(obs, _as_libcfg(library))
+    log.debug(
+        "matched: %s -> title=%r kind=%s season=%s episodes=%s status=%s via=%s "
+        "ids={imdb=%s tmdb=%s tvdb=%s anidb=%s}",
+        found.path.name, match.title, match.kind, match.season, match.episode_numbers,
+        match.match_status, match.identified_via or "none (unmatched)",
+        match.imdb_id, match.tmdb_id, match.tvdb_id, match.anidb_id,
+    )
     item, item_created = _item_record(session, library, match)
-    if item_created and summary is not None:
-        summary["items_added"] += 1
+    if item_created:
+        if summary is not None:
+            summary["items_added"] += 1
+        log.info(
+            "new title: %r (%s) kind=%s matched_via=%s ids={imdb=%s tmdb=%s tvdb=%s anidb=%s}",
+            match.title, match.year or "?", match.kind, match.identified_via or "none (unmatched)",
+            match.imdb_id, match.tmdb_id, match.tvdb_id, match.anidb_id,
+        )
     season_number = match.season if match.kind == "show" else None
     season = _season_record(session, item, season_number)
 
@@ -394,6 +419,7 @@ def _process_file(
     )
     sidecars = collect_subtitle_sidecars(found.path)
     _add_sidecars(file_row, sidecars)
+    _refresh_subtitle_summary(file_row)
 
     new_snapshot = _file_snapshot(file_row)
     if old_snapshot is not None and _has_meaningful_change(old_snapshot, new_snapshot):
@@ -529,6 +555,11 @@ def _reclassify_library(session: Session, library: Library) -> None:
             manual_override=item.classification_override,
         )
         if not item.classification_override:
+            if result.label != item.classification_label:
+                log.info(
+                    "classified: %r as %s (confidence=%.0f%%, reasons=%s)",
+                    item.title, result.label, result.confidence * 100, result.reasons,
+                )
             item.classification_label = result.label
             item.classification_confidence = result.confidence
             item.classification_reasons = result.reasons

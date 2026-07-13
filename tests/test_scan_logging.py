@@ -47,6 +47,61 @@ def test_unchanged_files_do_not_log_at_info(tmp_library, caplog) -> None:
     assert any("scan finished" in m and "unchanged=1" in m for m in messages)
 
 
+def test_scan_logs_new_title_and_classification(tmp_library, caplog) -> None:
+    with caplog.at_level(logging.INFO, logger="media_insights.scanner.service"):
+        scan_library(_config_for(tmp_library), tmp_library, force=True)
+
+    messages = [r.message for r in caplog.records]
+    assert any("new title:" in m and "Interstellar" in m for m in messages)
+    assert any("classified:" in m and "movie" in m for m in messages)
+
+
+def test_scan_does_not_relog_classification_when_unchanged(tmp_library, caplog) -> None:
+    cfg = _config_for(tmp_library)
+    scan_library(cfg, tmp_library, force=True)  # establishes the classification
+
+    with caplog.at_level(logging.INFO, logger="media_insights.scanner.service"):
+        scan_library(cfg, tmp_library, force=False)  # nothing changed
+
+    messages = [r.message for r in caplog.records]
+    assert not any("classified:" in m for m in messages)
+    assert not any("new title:" in m for m in messages)
+
+
+def test_match_detail_logged_at_debug(tmp_library, caplog) -> None:
+    with caplog.at_level(logging.DEBUG, logger="media_insights.scanner.service"):
+        scan_library(_config_for(tmp_library), tmp_library, force=True)
+
+    messages = [r.message for r in caplog.records]
+    assert any("matched:" in m and "via=" in m for m in messages)
+
+
+def test_startup_logs_offline_matching_disclaimer(tmp_path, caplog) -> None:
+    from fastapi.testclient import TestClient
+
+    from media_insights.api import configure, create_app
+    from media_insights.config import AppConfig, DatabaseConfig, ScheduleConfig, WatcherConfig
+    from media_insights.db import ensure_schema, init_engine
+
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    cfg = AppConfig(
+        config_dir=str(tmp_path),
+        database=DatabaseConfig(url=db_url),
+        watcher=WatcherConfig(enabled=False),
+        schedule=ScheduleConfig(enabled=False),
+    )
+    init_engine(db_url)
+    ensure_schema()
+    configure(cfg, tmp_path / "config.yaml")
+    app = create_app()
+
+    with caplog.at_level(logging.INFO, logger="media_insights.api.app"), TestClient(app):
+        pass
+
+    messages = [r.message for r in caplog.records]
+    assert any("offline only" in m and "no TVDB/IMDB/TMDB" in m for m in messages)
+
+
 def test_dispatcher_logs_why_events_are_skipped(tmp_path, caplog) -> None:
     from media_insights.config import AppConfig, DatabaseConfig
     from media_insights.db import init_engine, reset_for_tests, session_scope

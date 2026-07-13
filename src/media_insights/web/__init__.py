@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -38,6 +38,41 @@ def mount_web(app: FastAPI, templates: Jinja2Templates | None) -> None:
                 "items": items,
                 "unmatched": unmatched,
                 "events": events,
+            },
+        )
+
+    @app.get("/titles", response_class=HTMLResponse)
+    def titles(
+        request: Request,
+        library: int | None = None,
+        classification: str | None = None,
+        unmatched: bool = False,
+        offset: int = 0,
+        limit: int = Query(50, le=200),
+        session: Session = Depends(get_session),
+    ):
+        q = session.query(MediaItem)
+        if library is not None:
+            q = q.filter(MediaItem.library_id == library)
+        if classification:
+            q = q.filter(MediaItem.classification_label == classification)
+        if unmatched:
+            q = q.filter(MediaItem.match_status.in_(["unmatched", "unresolved"]))
+        total = q.count()
+        rows = q.order_by(MediaItem.title).offset(offset).limit(limit).all()
+        libs = session.query(Library).order_by(Library.name).all()
+        return templates.TemplateResponse(
+            request,
+            "titles.html",
+            {
+                "items": rows,
+                "libraries": libs,
+                "total": total,
+                "offset": offset,
+                "limit": limit,
+                "library": library,
+                "classification": classification,
+                "unmatched": unmatched,
             },
         )
 

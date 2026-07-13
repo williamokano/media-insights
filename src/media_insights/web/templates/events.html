@@ -3,6 +3,15 @@
 {% block content %}
 <h1>Change events</h1>
 {% if not events %}<p class="empty">No events recorded yet.</p>{% endif %}
+{% if events | selectattr('delivery_status', 'equalto', 'skipped') | list %}
+<p class="notice">
+  <strong>skipped</strong> means no webhook or exec hook is configured under
+  <code>webhooks:</code> / <code>exec_hooks:</code> in <code>config.yaml</code>.
+  It is not an error &mdash; every file change below was recorded correctly;
+  there was simply nowhere configured to deliver a notification about it.
+  Events stay here as a permanent audit log either way.
+</p>
+{% endif %}
 <table>
   <thead>
     <tr><th>Time (UTC)</th><th>Type</th><th>Subject</th><th>Status</th><th>Attempts</th><th>Error</th></tr>
@@ -13,7 +22,7 @@
       <td>{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
       <td><span class="event-type">{{ event.type }}</span></td>
       <td><code>{{ event.subject_path or '-' }}</code></td>
-      <td><span class="event-status status-{{ event.delivery_status }}">{{ event.delivery_status }}</span></td>
+      <td><span class="event-status status-{{ event.delivery_status }}" title="{% if event.delivery_status == 'skipped' %}No webhook/exec hook configured -- not a failure.{% endif %}">{{ event.delivery_status }}</span></td>
       <td>{{ event.delivery_attempts }}</td>
       <td><code class="error">{{ event.last_error or '' }}</code></td>
     </tr>

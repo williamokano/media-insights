@@ -50,7 +50,19 @@ def serialise_item(row: MediaItem, *, include_files: bool = False) -> dict[str, 
                 "id": s.id,
                 "number": s.number,
                 "files": [
-                    {"id": f.id, "path": f.path, "container": f.container}
+                    {
+                        "id": f.id,
+                        "path": f.path,
+                        "container": f.container,
+                        # Cheap: plain columns on MediaFile, not a relationship,
+                        # so including them here costs no extra query -- unlike
+                        # full per-track detail, which still needs include_files.
+                        "video_codec": f.video_codec,
+                        "video_width": f.video_width,
+                        "video_height": f.video_height,
+                        "audio_summary": f.audio_summary,
+                        "subtitle_summary": f.subtitle_summary,
+                    }
                     for f in s.files
                 ],
             }

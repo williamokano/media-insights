@@ -88,6 +88,11 @@ async def lifespan(app: FastAPI):
     state.scheduler = ScanScheduler(cfg)
     state.scheduler.start()
 
+    log.info(
+        "matching mode: offline only (.plexmatch + filename parsing) -- no TVDB/IMDB/TMDB "
+        "network calls are ever made; external IDs come from .plexmatch files or manual "
+        "identification via the UI/API"
+    )
     log.info("media-insights API ready: http://%s:%d", cfg.server.host, cfg.server.port)
     try:
         yield

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Titles &middot; media-insights{% endblock %}
+{% block content %}
+<h1>Titles</h1>
+
+<form class="filters" method="get" action="/titles">
+  <select name="library" onchange="this.form.submit()">
+    <option value="">All libraries</option>
+    {% for lib in libraries %}
+      <option value="{{ lib.id }}" {% if library == lib.id %}selected{% endif %}>{{ lib.name }}</option>
+    {% endfor %}
+  </select>
+  <select name="classification" onchange="this.form.submit()">
+    <option value="">All classifications</option>
+    {% for c in ("movie", "tv", "anime") %}
+      <option value="{{ c }}" {% if classification == c %}selected{% endif %}>{{ c }}</option>
+    {% endfor %}
+  </select>
+  <label style="display:flex;align-items:center;gap:6px;">
+    <input type="checkbox" name="unmatched" value="true" {% if unmatched %}checked{% endif %} onchange="this.form.submit()">
+    unmatched only
+  </label>
+</form>
+
+{% if not items %}<p class="empty">No titles match these filters.</p>{% endif %}
+<table>
+  <thead><tr><th>Title</th><th>Kind</th><th>Classification</th><th>Match</th><th>Files</th></tr></thead>
+  <tbody>
+    {% for item in items %}
+    <tr>
+      <td><a href="/items/{{ item.id }}">{{ item.title }}</a>{% if item.year %} <span class="year">({{ item.year }})</span>{% endif %}</td>
+      <td>{{ item.kind }}</td>
+      <td>
+        {{ item.classification_label or '?' }}
+        {% if item.classification_confidence is not none %}
+          <span class="conf">({{ '%.0f%%' % (item.classification_confidence * 100) }})</span>
+        {% endif %}
+      </td>
+      <td>{{ item.match_status }}</td>
+      <td>{{ item.seasons | map(attribute='files') | map('length') | sum }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if total > limit %}
+<nav class="pager">
+  {% set qs = "&library=%s&classification=%s&unmatched=%s" % (library or "", classification or "", "true" if unmatched else "") %}
+  {% if offset > 0 %}
+    <a href="/titles?offset={{ [offset - limit, 0] | max }}&limit={{ limit }}{{ qs }}">&laquo; previous</a>
+  {% endif %}
+  <span class="empty">{{ offset + 1 }}&ndash;{{ [offset + limit, total] | min }} of {{ total }}</span>
+  {% if offset + limit < total %}
+    <a href="/titles?offset={{ offset + limit }}&limit={{ limit }}{{ qs }}">next &raquo;</a>
+  {% endif %}
+</nav>
+{% endif %}
+{% endblock %}

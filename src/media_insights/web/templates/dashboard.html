@@ -10,7 +10,7 @@
   <div class="card">
     <h3>Titles</h3>
     <p class="metric">{{ items|length }}</p>
-    <a href="/api/items">browse</a>
+    <a href="/titles">browse</a>
   </div>
   <div class="card alert">
     <h3>Unmatched</h3>
@@ -44,12 +44,20 @@
 <section class="panel">
   <h2>Recent change events</h2>
   {% if not events %}<p class="empty">No events yet. Trigger a scan to see them appear.</p>{% endif %}
+  {% if events | selectattr('delivery_status', 'equalto', 'skipped') | list %}
+  <p class="notice">
+    <strong>skipped</strong> means no webhook or exec hook is configured in
+    <code>config.yaml</code> &mdash; the file changes below were all recorded
+    correctly, there was just nowhere to deliver a notification about them.
+    See <a href="/events">Events</a> for the full log.
+  </p>
+  {% endif %}
   <ul class="events">
     {% for event in events %}
       <li>
         <span class="event-type">{{ event.type }}</span>
         <code>{{ event.subject_path }}</code>
-        <span class="event-status status-{{ event.delivery_status }}">{{ event.delivery_status }}</span>
+        <span class="event-status status-{{ event.delivery_status }}" title="{% if event.delivery_status == 'skipped' %}No webhook/exec hook configured -- not a failure.{% endif %}">{{ event.delivery_status }}</span>
         <span class="event-time">{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
       </li>
     {% endfor %}
