@@ -90,3 +90,14 @@ def test_nav_has_titles_link(tmp_library) -> None:
     client = _client_for(tmp_library)
     r = client.get("/dashboard")
     assert '<a href="/titles">Titles</a>' in r.text
+
+
+def test_titles_page_handles_empty_library_filter(tmp_library) -> None:
+    """The 'All libraries' <select> option submits library= (empty string),
+    not an omitted parameter -- must render the page, not a 422 int-parsing
+    error, and must behave the same as not filtering by library at all."""
+    client = _client_for(tmp_library)
+    r = client.get("/titles?library=&classification=&unmatched=true")
+    assert r.status_code == 200
+    assert "<title>Titles" in r.text
+    assert "Interstellar" in r.text

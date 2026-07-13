@@ -143,6 +143,24 @@ def test_list_tracks_filter_by_is_forced() -> None:
     assert tracks[0]["kind"] == "subtitle"
 
 
+def test_list_tracks_empty_string_library_and_item_treated_as_unset() -> None:
+    """?library=&item= (e.g. from a client that always sends the param,
+    empty when unset) must behave like the param was omitted, not 422."""
+    client = _setup_app()
+    _seed()
+    r = client.get("/api/tracks", params={"library": "", "item": ""})
+    assert r.status_code == 200
+    assert len(r.json()["tracks"]) == 3
+
+
+def test_items_empty_string_library_treated_as_unset() -> None:
+    client = _setup_app()
+    _seed()
+    r = client.get("/api/items", params={"library": ""})
+    assert r.status_code == 200
+    assert len(r.json()["items"]) == 2
+
+
 def test_list_tracks_filter_by_library_and_item() -> None:
     client = _setup_app()
     ids = _seed()

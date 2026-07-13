@@ -18,6 +18,14 @@ log = logging.getLogger(__name__)
 # without alembic_version, the DB predates migrations being wired in.
 _SENTINEL_TABLE = "libraries"
 
+# The one migration whose schema is guaranteed to match exactly what
+# Base.metadata.create_all() used to produce, back before migrations were
+# wired into the app (0.0.6 and earlier). A pre-existing database must be
+# stamped at THIS revision, never at "head" -- head keeps moving forward as
+# new migrations ship, and stamping past a migration a database never
+# actually ran silently skips its DDL while claiming to be fully up to date.
+_PRE_MIGRATION_SCHEMA_REVISION = "d0f4d45356ad"
+
 _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
 
@@ -69,6 +77,31 @@ def _migrations_dir() -> Path:
     return Path(__file__).resolve().parent / "migrations"
 
 
+def _missing_columns(url: str) -> list[tuple[str, str]]:
+    """Compare Base.metadata's tables/columns against what physically exists.
+
+    Used as a defense-in-depth check after upgrading: a database that was
+    ever stamped straight to "head" by the old (buggy) version of this
+    function claims to be fully migrated in alembic_version while actually
+    missing columns added by migrations after that mistake.
+    """
+    from media_insights.models import Base
+
+    eng = create_engine(url, future=True)
+    try:
+        inspector = inspect(eng)
+        existing_tables = set(inspector.get_table_names())
+        missing: list[tuple[str, str]] = []
+        for table in Base.metadata.tables.values():
+            if table.name not in existing_tables:
+                continue  # a whole missing table is upgrade(head)'s job, not this check's
+            physical_columns = {c["name"] for c in inspector.get_columns(table.name)}
+            missing.extend((table.name, column.name) for column in table.columns if column.name not in physical_columns)
+        return missing
+    finally:
+        eng.dispose()
+
+
 def run_migrations(url: str) -> None:
     """Bring the schema up to date, replacing the old create_all()-only setup.
 
@@ -76,9 +109,10 @@ def run_migrations(url: str) -> None:
       - a brand-new database (no tables at all): runs every migration from
         scratch, same as create_all() used to.
       - a database created before migrations were wired in (tables exist via
-        create_all(), no alembic_version table): the schema already matches
-        head, so we *stamp* it as up to date instead of replaying DDL that
-        would try to CREATE TABLE on top of tables that already exist.
+        create_all(), no alembic_version table): its schema matches exactly
+        _PRE_MIGRATION_SCHEMA_REVISION -- not necessarily "head", which keeps
+        moving forward as new migrations ship -- so we stamp it there, then
+        let the upgrade below carry it forward through anything since.
 
     From here on, `alembic upgrade head` is the only thing that ever changes
     the schema, so a database on either starting point converges to the same
@@ -107,11 +141,29 @@ def run_migrations(url: str) -> None:
         cfg.attributes["configure_logger"] = False
 
         if _SENTINEL_TABLE in existing_tables and "alembic_version" not in existing_tables:
-            command.stamp(cfg, "head")
-            log.info("pre-existing database stamped as up to date (schema already matched head)")
-        else:
+            command.stamp(cfg, _PRE_MIGRATION_SCHEMA_REVISION)
+            log.info("pre-existing database stamped at the initial schema revision")
+
+        command.upgrade(cfg, "head")
+        log.info("database migrations applied (head)")
+
+        # One-time repair for databases an older, buggy build of this
+        # function already stamped straight to head (see CHANGELOG 0.0.9):
+        # alembic_version claims head, so the upgrade above was a no-op, but
+        # the physical schema is missing whatever that mistake skipped.
+        missing = _missing_columns(url)
+        if missing:
+            log.warning(
+                "schema drift detected after upgrade (missing columns: %s) -- "
+                "re-anchoring to the initial revision and replaying migrations for real",
+                missing,
+            )
+            command.stamp(cfg, _PRE_MIGRATION_SCHEMA_REVISION)
             command.upgrade(cfg, "head")
-            log.info("database migrations applied (head)")
+            still_missing = _missing_columns(url)
+            if still_missing:
+                raise RuntimeError(f"schema repair failed, still missing columns: {still_missing}")
+            log.info("schema drift repaired")
 
         _migrated_urls.add(url)
 

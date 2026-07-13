@@ -39,6 +39,13 @@ from media_insights.web import mount_web
 log = logging.getLogger(__name__)
 
 
+def _parse_optional_id(value: str | None) -> int | None:
+    """An empty string ("?library=") is not the same as an omitted
+    parameter -- FastAPI's int | None binding rejects "" outright, so this
+    is accepted as a plain string query param and converted by hand."""
+    return int(value) if value else None
+
+
 class IdentifyRequest(BaseModel):
     guid: str | None = None
     imdb_id: str | None = None
@@ -323,7 +330,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/items")
     def list_items(
-        library: int | None = None,
+        library: str | None = None,
         classification: str | None = None,
         unmatched: bool = False,
         missing_subtitle_language: str | None = None,
@@ -332,9 +339,10 @@ def create_app() -> FastAPI:
         offset: int = 0,
         session: Session = Depends(get_session),
     ) -> dict:
+        library_id = _parse_optional_id(library)
         q = session.query(MediaItem)
-        if library is not None:
-            q = q.filter(MediaItem.library_id == library)
+        if library_id is not None:
+            q = q.filter(MediaItem.library_id == library_id)
         if classification:
             q = q.filter(MediaItem.classification_label == classification)
         if unmatched:
@@ -355,12 +363,14 @@ def create_app() -> FastAPI:
         is_forced: bool | None = None,
         is_sdh: bool | None = None,
         is_external: bool | None = None,
-        library: int | None = None,
-        item: int | None = None,
+        library: str | None = None,
+        item: str | None = None,
         limit: int = Query(200, le=1000),
         offset: int = 0,
         session: Session = Depends(get_session),
     ) -> dict:
+        library_id = _parse_optional_id(library)
+        item_id = _parse_optional_id(item)
         q = (
             session.query(Track, MediaFile.id, MediaFile.path, MediaItem.id, MediaItem.title, MediaItem.library_id)
             .join(MediaFile, Track.file_id == MediaFile.id)
@@ -381,10 +391,10 @@ def create_app() -> FastAPI:
             q = q.filter(Track.is_sdh == is_sdh)
         if is_external is not None:
             q = q.filter(Track.is_external == is_external)
-        if library is not None:
-            q = q.filter(MediaItem.library_id == library)
-        if item is not None:
-            q = q.filter(MediaItem.id == item)
+        if library_id is not None:
+            q = q.filter(MediaItem.library_id == library_id)
+        if item_id is not None:
+            q = q.filter(MediaItem.id == item_id)
         rows = (
             q.order_by(MediaItem.title, MediaFile.path, Track.position)
             .offset(offset)

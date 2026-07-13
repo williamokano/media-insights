@@ -11,6 +11,13 @@ from media_insights.db import get_session
 from media_insights.models import ChangeEvent, Library, MediaItem
 
 
+def _parse_optional_id(value: str | None) -> int | None:
+    """HTML <select> "All ___" options submit an empty string, not an
+    omitted parameter -- FastAPI's int | None binding rejects "" outright,
+    so this is parsed as a plain string query param and converted by hand."""
+    return int(value) if value else None
+
+
 def mount_web(app: FastAPI, templates: Jinja2Templates | None) -> None:
     """Mount HTML pages onto the FastAPI app."""
     if templates is None:
@@ -44,16 +51,17 @@ def mount_web(app: FastAPI, templates: Jinja2Templates | None) -> None:
     @app.get("/titles", response_class=HTMLResponse)
     def titles(
         request: Request,
-        library: int | None = None,
+        library: str | None = None,
         classification: str | None = None,
         unmatched: bool = False,
         offset: int = 0,
         limit: int = Query(50, le=200),
         session: Session = Depends(get_session),
     ):
+        library_id = _parse_optional_id(library)
         q = session.query(MediaItem)
-        if library is not None:
-            q = q.filter(MediaItem.library_id == library)
+        if library_id is not None:
+            q = q.filter(MediaItem.library_id == library_id)
         if classification:
             q = q.filter(MediaItem.classification_label == classification)
         if unmatched:
@@ -70,7 +78,7 @@ def mount_web(app: FastAPI, templates: Jinja2Templates | None) -> None:
                 "total": total,
                 "offset": offset,
                 "limit": limit,
-                "library": library,
+                "library": library_id,
                 "classification": classification,
                 "unmatched": unmatched,
             },

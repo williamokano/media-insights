@@ -8,6 +8,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.9] - 2026-07-13
+
+### Fixed
+
+- **Critical**: `run_migrations()`'s handling of a database that had never run
+  migrations before (tables from the old `create_all()`-only startup, no
+  `alembic_version` table) stamped it straight to `"head"` instead of the
+  revision that actually matched its physical schema. That was harmless
+  while there was only one migration, but the moment 0.0.8 shipped a second
+  one (`language_raw`), any database still in that pre-migration state got
+  stamped past a migration it never actually ran -- `alembic_version` claimed
+  it was fully up to date while the physical column was silently never
+  added, breaking every read/write against `tracks` (`no such column:
+  tracks.language_raw`) rather than just the intended column. Fixed to
+  stamp at the correct historical revision and always upgrade forward from
+  there for real. A database already left in the broken state by 0.0.8 is
+  now self-repaired automatically on next startup: `run_migrations()`
+  detects columns the current models expect but the physical schema is
+  missing despite `alembic_version` claiming to be current, and re-runs the
+  needed migrations for real. No manual steps required -- just upgrade to
+  this version and restart.
+- `GET /titles`'s library filter, and `GET /api/items` / `GET /api/tracks`'s
+  `library`/`item` filters, 422'd with a raw JSON validation error instead
+  of rendering/responding normally when given an empty value (e.g.
+  `?library=`) -- which is exactly what the "All libraries" dropdown on the
+  `/titles` page submits when nothing is selected, since HTML `<select>`
+  elements send an empty string, not an omitted parameter. Now treated the
+  same as the filter not being set at all.
+
 ## [0.0.8] - 2026-07-13
 
 ### Added
@@ -198,7 +227,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (amd64/arm64) with `PUID`/`PGID` support,
   published to GHCR on tagged releases.
 
-[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.0.8...HEAD
+[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.0.9...HEAD
+[0.0.9]: https://github.com/williamokano/media-insights/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/williamokano/media-insights/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/williamokano/media-insights/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/williamokano/media-insights/compare/v0.0.5...v0.0.6
