@@ -8,6 +8,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-07-13
+
+### Added
+
+- `GET /api/tracks`: query the library by track attributes directly --
+  `kind`, `language`, `language_raw`, `is_default`, `is_forced`, `is_sdh`,
+  `is_external`, `library`, `item`, with pagination. Each result includes
+  enough context (file path, item id/title, library id) to be useful on its
+  own, e.g. `?kind=subtitle&language=en` or `?kind=audio&language=ja`.
+- `GET /api/items` gained `missing_subtitle_language` / `missing_audio_language`
+  filters, e.g. `?missing_subtitle_language=en` lists every title with no
+  English subtitle track anywhere -- the negative-case complement to
+  `/api/tracks`.
+- Every track now carries both a normalized language code (`language`, e.g.
+  `"en"`) and the exact original value as read from the file or subtitle
+  filename (`language_raw`, e.g. `"eng"`, `"pt-BR"`), plus a human-readable
+  `language_display` (e.g. `"English"`). Previously `language` stored
+  whatever the source happened to use verbatim -- a mix of alpha-3 codes,
+  alpha-2 codes, and locale tags depending on where a given track came from
+  -- which made it unreliable to query or group on. Normalization is backed
+  by `babelfish` (already a dependency), covering alpha-2, alpha-3, IETF
+  locale tags (`pt-BR` -> `pt`), and legacy bibliographic codes (`fre`,
+  `ger`, `chi`, ...). Existing rows are backfilled on upgrade
+  (`language_raw` copied from the old `language` value) but are only
+  genuinely renormalized the next time a file is re-probed -- same
+  staleness pattern as `subtitle_summary` in 0.0.6, resolved by a
+  force-rescan.
+- `GET /api/items/{id}` and `GET /api/files/{id}` now return `video_tracks`
+  / `audio_tracks` / `subtitle_tracks` / `data_tracks` instead of a single
+  flat, mixed `tracks` array -- a breaking response-shape change (this
+  project is pre-1.0), made because nothing else in the app or its tests
+  depended on the old shape.
+
 ## [0.0.7] - 2026-07-13
 
 ### Fixed
@@ -165,7 +198,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-arch Docker image (amd64/arm64) with `PUID`/`PGID` support,
   published to GHCR on tagged releases.
 
-[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.0.7...HEAD
+[Unreleased]: https://github.com/williamokano/media-insights/compare/v0.0.8...HEAD
+[0.0.8]: https://github.com/williamokano/media-insights/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/williamokano/media-insights/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/williamokano/media-insights/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/williamokano/media-insights/compare/v0.0.4...v0.0.5

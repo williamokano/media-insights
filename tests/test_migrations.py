@@ -32,10 +32,54 @@ def test_run_migrations_creates_full_schema_on_empty_db(tmp_path: Path) -> None:
 
     eng = create_engine(url)
     tables = set(inspect(eng).get_table_names())
+    track_columns = {c["name"] for c in inspect(eng).get_columns("tracks")}
     eng.dispose()
 
     assert {"libraries", "media_items", "seasons", "media_files", "tracks", "change_events"} <= tables
     assert "alembic_version" in tables
+    assert "language_raw" in track_columns
+
+
+def test_language_raw_backfill_copies_existing_language_value(tmp_path: Path) -> None:
+    """Rows created before the language_raw column existed should end up
+    with language_raw == their old language value on upgrade -- the best
+    available backfill (see the migration's docstring and
+    scanner/service.py for why this isn't a perfect reconstruction). The
+    migration must copy, not renormalize: language stays 'jpn' here, not
+    'ja' -- renormalization only happens on the next re-probe.
+    """
+    from alembic import command
+    from alembic.config import Config as AlembicConfig
+
+    from media_insights.db import _migrations_dir
+
+    url = f"sqlite:///{tmp_path}/test.db"
+    cfg = AlembicConfig()
+    cfg.set_main_option("script_location", str(_migrations_dir()))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "d0f4d45356ad")  # schema as it existed before language_raw
+
+    eng = create_engine(url)
+    with eng.connect() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO tracks (file_id, position, kind, language, "
+                "is_default, is_forced, is_sdh, is_external) "
+                "VALUES (1, 0, 'audio', 'jpn', 0, 0, 0, 0)"
+            )
+        )
+        conn.commit()
+    eng.dispose()
+
+    command.upgrade(cfg, "head")
+
+    eng = create_engine(url)
+    with eng.connect() as conn:
+        row = conn.execute(text("SELECT language, language_raw FROM tracks")).fetchone()
+        assert row is not None
+        assert row[0] == "jpn"
+        assert row[1] == "jpn"
+    eng.dispose()
 
 
 def test_run_migrations_is_idempotent(tmp_path: Path) -> None:

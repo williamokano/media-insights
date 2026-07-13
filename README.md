@@ -255,13 +255,14 @@ media-insights version
 | POST   | `/api/libraries` | add a library — body `{"name", "path", "kind"}`; `path` must exist |
 | PUT    | `/api/libraries/{id}` | rename / repoint a library |
 | DELETE | `/api/libraries/{id}` | stop scanning/watching (data kept); add `?purge=true` to also delete its indexed data |
-| GET    | `/api/items` | filter by library / classification / unmatched; paginate |
-| GET    | `/api/items/{id}` | full item incl. files + tracks |
+| GET    | `/api/items` | filter by library / classification / unmatched / `missing_subtitle_language` / `missing_audio_language`; paginate |
+| GET    | `/api/items/{id}` | full item incl. files + `video_tracks` / `audio_tracks` / `subtitle_tracks` |
 | POST   | `/api/items/{id}/identify` | attach `imdb_id` / `tmdb_id` / `tvdb_id` / `anidb_id` / `guid` / `classification` |
 | POST   | `/api/items/{id}/classification` | override label (`anime`/`tv`/`movie`) |
 | GET    | `/api/unmatched` | items with no external IDs |
 | GET    | `/api/search?q=...` | title / path LIKE search |
-| GET    | `/api/files/{id}` | file + tracks |
+| GET    | `/api/files/{id}` | file + `video_tracks` / `audio_tracks` / `subtitle_tracks` |
+| GET    | `/api/tracks` | query tracks directly — `kind` / `language` / `language_raw` / `is_default` / `is_forced` / `is_sdh` / `is_external` / `library` / `item`; paginate |
 | POST   | `/api/scan` | trigger scan (`?library=Name` to scope) |
 | POST   | `/api/rescan` | body `{"path": "..."}` — single-path rescan |
 
@@ -297,9 +298,9 @@ nothing is reported as a failure.
     "video_codec": "h264", "video_width": 1920, "video_height": 1080,
     "audio_summary": "jpn/truehd", "subtitle_summary": "en/ass",
     "tracks": [
-      {"position": 0, "kind": "video", "codec": "h264", "language": null},
-      {"position": 1, "kind": "audio", "codec": "truehd", "language": "jpn"},
-      {"position": 2, "kind": "subtitle", "codec": "ass", "language": "en"}
+      {"position": 0, "kind": "video", "codec": "h264", "language": null, "language_raw": null},
+      {"position": 1, "kind": "audio", "codec": "truehd", "language": "ja", "language_raw": "jpn"},
+      {"position": 2, "kind": "subtitle", "codec": "ass", "language": "en", "language_raw": "eng"}
     ],
     "fingerprint": "ab12...", "size": 8589934592
   },

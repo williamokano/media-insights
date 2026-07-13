@@ -16,11 +16,16 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from media_insights import config_store
-from media_insights.api.serializers import serialise_file, serialise_item, serialise_library
+from media_insights.api.serializers import (
+    serialise_file,
+    serialise_item,
+    serialise_library,
+    serialise_track,
+)
 from media_insights.config import AppConfig, LibraryConfig, resolve_config_path
 from media_insights.db import get_session, init_engine, run_migrations, session_scope
 from media_insights.events import Dispatcher
-from media_insights.models import Library, MediaFile, MediaItem
+from media_insights.models import Library, MediaFile, MediaItem, Season, Track
 from media_insights.scanner import (
     MediaWatcher,
     ScanScheduler,
@@ -305,11 +310,24 @@ def create_app() -> FastAPI:
             state.watcher.uninstall_library(path)
         return Response(status_code=204)
 
+    def _missing_track_language_filter(session: Session, kind: str, language: str):
+        """~EXISTS(...): items with no track of `kind` normalized to `language`."""
+        has_track = (
+            session.query(Track.id)
+            .join(MediaFile, Track.file_id == MediaFile.id)
+            .join(Season, MediaFile.season_id == Season.id)
+            .filter(Season.item_id == MediaItem.id, Track.kind == kind, Track.language == language.lower())
+            .exists()
+        )
+        return ~has_track
+
     @app.get("/api/items")
     def list_items(
         library: int | None = None,
         classification: str | None = None,
         unmatched: bool = False,
+        missing_subtitle_language: str | None = None,
+        missing_audio_language: str | None = None,
         limit: int = Query(50, le=500),
         offset: int = 0,
         session: Session = Depends(get_session),
@@ -321,8 +339,71 @@ def create_app() -> FastAPI:
             q = q.filter(MediaItem.classification_label == classification)
         if unmatched:
             q = q.filter(MediaItem.match_status == "unmatched")
+        if missing_subtitle_language:
+            q = q.filter(_missing_track_language_filter(session, "subtitle", missing_subtitle_language))
+        if missing_audio_language:
+            q = q.filter(_missing_track_language_filter(session, "audio", missing_audio_language))
         rows = q.order_by(MediaItem.title).offset(offset).limit(limit).all()
         return {"items": [serialise_item(r) for r in rows]}
+
+    @app.get("/api/tracks")
+    def list_tracks(
+        kind: str | None = None,
+        language: str | None = None,
+        language_raw: str | None = None,
+        is_default: bool | None = None,
+        is_forced: bool | None = None,
+        is_sdh: bool | None = None,
+        is_external: bool | None = None,
+        library: int | None = None,
+        item: int | None = None,
+        limit: int = Query(200, le=1000),
+        offset: int = 0,
+        session: Session = Depends(get_session),
+    ) -> dict:
+        q = (
+            session.query(Track, MediaFile.id, MediaFile.path, MediaItem.id, MediaItem.title, MediaItem.library_id)
+            .join(MediaFile, Track.file_id == MediaFile.id)
+            .join(Season, MediaFile.season_id == Season.id)
+            .join(MediaItem, Season.item_id == MediaItem.id)
+        )
+        if kind:
+            q = q.filter(Track.kind == kind)
+        if language:
+            q = q.filter(Track.language == language.lower())
+        if language_raw:
+            q = q.filter(Track.language_raw == language_raw)
+        if is_default is not None:
+            q = q.filter(Track.is_default == is_default)
+        if is_forced is not None:
+            q = q.filter(Track.is_forced == is_forced)
+        if is_sdh is not None:
+            q = q.filter(Track.is_sdh == is_sdh)
+        if is_external is not None:
+            q = q.filter(Track.is_external == is_external)
+        if library is not None:
+            q = q.filter(MediaItem.library_id == library)
+        if item is not None:
+            q = q.filter(MediaItem.id == item)
+        rows = (
+            q.order_by(MediaItem.title, MediaFile.path, Track.position)
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        return {
+            "tracks": [
+                {
+                    **serialise_track(track),
+                    "file_id": file_id,
+                    "file_path": file_path,
+                    "item_id": item_id,
+                    "item_title": item_title,
+                    "library_id": library_id,
+                }
+                for track, file_id, file_path, item_id, item_title, library_id in rows
+            ]
+        }
 
     @app.get("/api/items/{item_id}")
     def get_item(item_id: int, session: Session = Depends(get_session)) -> dict:

@@ -19,6 +19,9 @@ def test_scan_movie_extracts_metadata(tmp_library) -> None:
         assert files
         tracks = session.query(Track).all()
         assert any(t.kind == "audio" for t in tracks)
+        audio_tracks = [t for t in tracks if t.kind == "audio"]
+        assert audio_tracks[0].language == "en"
+        assert audio_tracks[0].language_raw == "eng"
 
 
 def test_scan_tv_two_episodes(tmp_tv) -> None:
@@ -47,6 +50,8 @@ def test_scan_anime_classified_correctly(tmp_anime) -> None:
         assert tracks
         langs = {t.language for t in tracks}
         assert "en" in langs
+        raws = {t.language_raw for t in tracks}
+        assert "en" in raws
         # subtitle_summary must include external sidecars too, not just
         # ffprobe-embedded tracks -- this is the compact field the item
         # detail page and API list view show, so a missing external track

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from media_insights.config import AppConfig
+from media_insights.language import display_name
 from media_insights.models import Library, MediaFile, MediaItem, Track
 
 
@@ -99,7 +100,10 @@ def serialise_file(row: MediaFile, *, include_tracks: bool = False) -> dict[str,
         "last_seen": row.last_seen.isoformat() if row.last_seen else None,
     }
     if include_tracks:
-        data["tracks"] = [serialise_track(t) for t in row.tracks]
+        data["video_tracks"] = [serialise_track(t) for t in row.tracks if t.kind == "video"]
+        data["audio_tracks"] = [serialise_track(t) for t in row.tracks if t.kind == "audio"]
+        data["subtitle_tracks"] = [serialise_track(t) for t in row.tracks if t.kind == "subtitle"]
+        data["data_tracks"] = [serialise_track(t) for t in row.tracks if t.kind == "data"]
     return data
 
 
@@ -109,6 +113,8 @@ def serialise_track(row: Track) -> dict[str, Any]:
         "kind": row.kind,
         "codec": row.codec,
         "language": row.language,
+        "language_raw": row.language_raw,
+        "language_display": display_name(row.language),
         "title": row.title,
         "channels": row.channels,
         "bit_rate": row.bit_rate,

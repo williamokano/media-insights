@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from media_insights.language import normalize_language
+
 
 @dataclass(slots=True)
 class TrackInfo:
     position: int            # zero-based stream index
     kind: str                # video | audio | subtitle | data
     codec: str | None = None
-    language: str | None = None
+    language: str | None = None       # normalized code, e.g. "en"
+    language_raw: str | None = None   # verbatim tag value, e.g. "eng", "jpn", "pt-BR"
     title: str | None = None
     channels: float | None = None
     bit_rate: int | None = None
@@ -24,21 +27,6 @@ class TrackInfo:
     dynamic_range: str | None = None  # SDR / HDR10 / DV / HLG
     color_transfer: str | None = None
     frame_rate: float | None = None
-
-    def to_db(self, file_id: int) -> dict:
-        return {
-            "file_id": file_id,
-            "position": self.position,
-            "kind": self.kind,
-            "codec": self.codec,
-            "language": self.language,
-            "title": self.title,
-            "channels": self.channels,
-            "bit_rate": self.bit_rate,
-            "is_default": self.is_default,
-            "is_forced": self.is_forced,
-            "is_sdh": self.is_sdh,
-        }
 
 
 @dataclass(slots=True)
@@ -124,7 +112,8 @@ def parse_ffprobe(data: dict) -> ProbeResult:
             continue
         tags = stream.get("tags") or {}
         disposition = stream.get("disposition") or {}
-        language = tags.get("language") or tags.get("LANGUAGE")
+        raw_language = tags.get("language") or tags.get("LANGUAGE")
+        lang_info = normalize_language(raw_language)
         title = tags.get("title") or tags.get("TITLE")
         is_default, is_forced, is_sdh = _flags_from_tags(tags, disposition)
 
@@ -132,7 +121,8 @@ def parse_ffprobe(data: dict) -> ProbeResult:
             position=idx,
             kind=codec_type,
             codec=stream.get("codec_name"),
-            language=language,
+            language=lang_info.normalized if lang_info else None,
+            language_raw=lang_info.raw if lang_info else None,
             title=title,
             bit_rate=_safe_int(stream.get("bit_rate")),
             is_default=is_default,

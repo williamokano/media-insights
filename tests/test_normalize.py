@@ -23,13 +23,16 @@ def test_parse_ffprobe_basic(sample_ffprobe_streams: dict) -> None:
     assert video.dynamic_range == "HDR10"
     audio = result.audio_tracks
     assert len(audio) == 2
-    assert audio[0].language == "jpn"
+    assert audio[0].language == "ja"
+    assert audio[0].language_raw == "jpn"
     assert audio[0].channels == 7.1
     assert audio[1].is_default is True
     assert audio[1].language == "en"
+    assert audio[1].language_raw == "en"
     subs = result.subtitle_tracks
     assert len(subs) == 1
     assert subs[0].language == "en"
+    assert subs[0].language_raw == "en"
 
 
 def test_flags_extracted_from_disposition(sample_ffprobe_streams: dict) -> None:

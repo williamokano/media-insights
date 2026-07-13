@@ -143,6 +143,7 @@ class Track(Base):
     kind: Mapped[str] = mapped_column(String(16))  # video | audio | subtitle | data
     codec: Mapped[str | None] = mapped_column(String(64), nullable=True)
     language: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    language_raw: Mapped[str | None] = mapped_column(String(32), nullable=True)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     channels: Mapped[float | None] = mapped_column(Float, nullable=True)  # 2.0 / 5.1 / 7.1
     bit_rate: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

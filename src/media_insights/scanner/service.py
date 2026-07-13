@@ -162,6 +162,7 @@ def _file_snapshot(file: MediaFile) -> dict:
                 "kind": t.kind,
                 "codec": t.codec,
                 "language": t.language,
+                "language_raw": t.language_raw,
                 "title": t.title,
                 "channels": t.channels,
                 "bit_rate": t.bit_rate,
@@ -189,7 +190,7 @@ def _apply_probe(file: MediaFile, probe: ProbeResult, ffprobe_bin: str, fingerpr
         file.video_dynamic_range = video.dynamic_range
 
     file.audio_summary = ", ".join(
-        f"{t.language or 'und'}/{t.codec or '?'}" for t in probe.audio_tracks
+        f"{t.language or t.language_raw or 'und'}/{t.codec or '?'}" for t in probe.audio_tracks
     ) or None
     # subtitle_summary is computed later, in _refresh_subtitle_summary(), once
     # external sidecars have been added too -- embedded-only here would drop
@@ -205,6 +206,7 @@ def _apply_probe(file: MediaFile, probe: ProbeResult, ffprobe_bin: str, fingerpr
                 kind=track.kind,
                 codec=track.codec,
                 language=track.language,
+                language_raw=track.language_raw,
                 title=track.title,
                 channels=track.channels,
                 bit_rate=track.bit_rate,
@@ -236,6 +238,7 @@ def _add_sidecars(file: MediaFile, sidecars: Iterable) -> None:
                 kind="subtitle",
                 codec=_sidecar_codec(sc.path),
                 language=sc.language,
+                language_raw=sc.language_raw,
                 title=sc.path.name,
                 is_default=sc.is_default,
                 is_forced=sc.is_forced,
@@ -261,7 +264,7 @@ def _refresh_subtitle_summary(file: MediaFile) -> None:
     """
     subs = [t for t in file.tracks if t.kind == "subtitle"]
     file.subtitle_summary = ", ".join(
-        f"{t.language or 'und'}/{t.codec or '?'}" for t in subs
+        f"{t.language or t.language_raw or 'und'}/{t.codec or '?'}" for t in subs
     ) or None
 
 
