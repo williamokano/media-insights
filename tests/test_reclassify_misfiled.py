@@ -173,6 +173,86 @@ def test_misfiled_ignores_auto_libraries() -> None:
     assert client.get("/api/items", params={"misfiled": "true"}).json()["items"] == []
 
 
+def _seed_anime_movie(*, library_kind: str) -> tuple[int, int]:
+    """Chainsaw Man: Reze Arc -- Japanese audio, non-Japanese subs, one file.
+    Anime *and* a movie. Returns (item_id, library_id)."""
+    with session_scope() as session:
+        library = Library(name="Lib", path="/data/lib", kind=library_kind)
+        session.add(library)
+        session.flush()
+
+        item = MediaItem(
+            library_id=library.id, kind="movie", title="Chainsaw Man: Reze Arc", year=2025,
+            match_status="unresolved",
+        )
+        session.add(item)
+        session.flush()
+
+        season = Season(item_id=item.id, number=None)
+        session.add(season)
+        session.flush()
+
+        file = MediaFile(season_id=season.id, path="/data/lib/Chainsaw Man Reze Arc.mkv")
+        session.add(file)
+        session.flush()
+
+        session.add_all([
+            Track(file_id=file.id, position=0, kind="audio", codec="aac",
+                  language="ja", language_raw="jpn"),
+            Track(file_id=file.id, position=1, kind="subtitle", codec="subrip",
+                  language="en", language_raw="eng"),
+        ])
+        session.commit()
+        return item.id, library.id
+
+
+def test_anime_movie_in_movies_library_is_not_misfiled() -> None:
+    client, _ = _setup()
+    item_id, _ = _seed_anime_movie(library_kind="movie")
+    client.post("/api/reclassify")
+
+    with session_scope() as session:
+        item = session.get(MediaItem, item_id)
+        assert item is not None
+        assert item.classification_label == "anime_movie"
+
+    assert client.get("/api/items", params={"misfiled": "true"}).json()["items"] == []
+
+
+def test_anime_movie_in_anime_library_is_not_misfiled() -> None:
+    client, _ = _setup()
+    _seed_anime_movie(library_kind="anime")
+    client.post("/api/reclassify")
+
+    assert client.get("/api/items", params={"misfiled": "true"}).json()["items"] == []
+
+
+def test_anime_movie_in_tv_library_is_misfiled() -> None:
+    client, _ = _setup()
+    _seed_anime_movie(library_kind="tv")
+    client.post("/api/reclassify")
+
+    body = client.get("/api/items", params={"misfiled": "true"}).json()
+    assert len(body["items"]) == 1
+    assert body["items"][0]["classification"]["label"] == "anime_movie"
+
+
+def test_is_misfiled_predicate_matches_the_compatibility_table() -> None:
+    from media_insights.classify import is_misfiled
+
+    assert not is_misfiled("movie", "movie")
+    assert not is_misfiled("movie", "anime_movie")
+    assert is_misfiled("movie", "anime")
+    assert is_misfiled("movie", "tv")
+    assert not is_misfiled("anime", "anime")
+    assert not is_misfiled("anime", "anime_movie")
+    assert is_misfiled("anime", "tv")
+    assert not is_misfiled("tv", "tv")
+    assert is_misfiled("tv", "anime_movie")
+    assert not is_misfiled("auto", "anime")  # auto asserts nothing
+    assert not is_misfiled("movie", None)  # nothing to disagree with yet
+
+
 def test_misfiled_page_renders() -> None:
     client, _ = _setup()
     _seed_anime_inside_tv_library()

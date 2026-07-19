@@ -108,6 +108,14 @@ class ProvidersConfig(BaseModel):
     tvdb: TvdbConfig = Field(default_factory=TvdbConfig)
 
 
+class SubtitlesConfig(BaseModel):
+    # ISO-639 code, or any token language.py can resolve (pt-BR, por,
+    # portuguese, ...). Drives the default for `GET /api/subtitle-coverage`
+    # and the `subtitle-coverage` CLI command when neither passes one
+    # explicitly.
+    coverage_language: str = "pt"
+
+
 class AppConfig(BaseModel):
     config_dir: str = "/config"
     data_dir: str = "/data"
@@ -122,6 +130,7 @@ class AppConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     ffmpeg: FfmpegConfig = Field(default_factory=FfmpegConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    subtitles: SubtitlesConfig = Field(default_factory=SubtitlesConfig)
 
 
 _ENV_PREFIX = "MI_"

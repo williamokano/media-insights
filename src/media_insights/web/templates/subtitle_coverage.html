@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Subtitles &middot; media-insights{% endblock %}
+{% block content %}
+<h1>Subtitle coverage</h1>
+
+<p class="notice">
+  Which shows have <strong>{{ language_display or language_token }}</strong> subtitles in
+  every single episode, and for the ones that don't, exactly which episodes
+  are missing them. Scoped to episodic libraries (anime + TV) &mdash; a movie
+  is a single file, so "N of M episodes" doesn't apply to it.
+</p>
+
+<form class="filters" method="get" action="/subtitle-coverage">
+  <input type="text" name="language" value="{{ language_token }}" placeholder="pt, pt-BR, portuguese, ...">
+  <select name="library" onchange="this.form.submit()">
+    <option value="">All libraries</option>
+    {% for lib in libraries %}
+      <option value="{{ lib.id }}" {% if library == lib.id %}selected{% endif %}>{{ lib.name }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Apply</button>
+</form>
+
+{% if unrecognized %}
+  <p class="empty">Unrecognized language: &ldquo;{{ language_token }}&rdquo;. Try an ISO-639 code
+  (pt, en, ja, ...), a locale tag (pt-BR), or a full name (Portuguese).</p>
+{% else %}
+
+<section class="panel">
+  <h2>Complete <span class="badge">{{ complete_items | length }}</span></h2>
+  {% if not complete_items %}
+    <p class="empty">No shows have {{ language_display }} in every episode yet.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Title</th><th>Library</th><th>Episodes</th></tr></thead>
+    <tbody>
+      {% for it in complete_items %}
+      <tr>
+        <td><a href="/items/{{ it.item_id }}">{{ it.title }}</a>{% if it.year %} <span class="year">({{ it.year }})</span>{% endif %}</td>
+        <td>{{ it.library_name }}</td>
+        <td><span class="badge-on">{{ it.episodes_with }}/{{ it.episodes_total }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Incomplete <span class="badge">{{ incomplete_items | length }}</span></h2>
+  {% if not incomplete_items %}
+    <p class="empty">Nothing incomplete &mdash; every show either has full coverage or none at all.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Title</th><th>Library</th><th>Episodes</th><th>Missing</th></tr></thead>
+    <tbody>
+      {% for it in incomplete_items %}
+      <tr>
+        <td><a href="/items/{{ it.item_id }}">{{ it.title }}</a>{% if it.year %} <span class="year">({{ it.year }})</span>{% endif %}</td>
+        <td>{{ it.library_name }}</td>
+        <td><span class="badge-off">{{ it.episodes_with }}/{{ it.episodes_total }}</span></td>
+        <td>
+          <details>
+            <summary>{{ it.episodes_missing }} missing</summary>
+            <ul class="results">
+              {% for ep in it.episodes if not ep.has_language %}
+                <li><code>{{ ep.path }}</code></li>
+              {% endfor %}
+            </ul>
+          </details>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+
+{% endif %}
+{% endblock %}

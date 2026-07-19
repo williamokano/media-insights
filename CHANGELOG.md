@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-19
+
+### Added
+
+- **`anime_movie` classification label.** Anime and movie were treated as
+  mutually exclusive, so a title like *Chainsaw Man: Reze Arc* -- anime, but
+  also a movie -- collapsed to `anime` and then showed up on `/misfiled`
+  despite being correctly filed in a Movies library. The classifier now
+  recognizes when the evidence leans anime *and* the title is movie-format
+  (single file, or a provider saying `kind: movie`), and labels it
+  `anime_movie` instead, with reasons merged from both facets. The misfiled
+  worklist now uses a compatibility table instead of a straight equality
+  check: `anime_movie` is correctly filed in a Movies library *or* an Anime
+  library, misfiled only in a TV library. No migration -- existing rows
+  relabel on the next `POST /api/reclassify` or scan.
+- **Subtitle-language coverage search.** `GET /api/subtitle-coverage`, the
+  `subtitle-coverage` CLI command, and a new `/subtitle-coverage` Web UI
+  page answer: which shows have a given subtitle language in *every*
+  episode, and for the ones that don't, exactly which episodes are missing
+  it and how many. Scoped to episodic libraries (anime + TV) -- a movie
+  doesn't have an "N of M episodes" to report. The target language defaults
+  to `subtitles.coverage_language` in `config.yaml` (Portuguese, `pt`, out
+  of the box) and accepts any token `language.py` can resolve: `pt`,
+  `pt-BR`, `por`, `portuguese` all mean the same thing.
+- **Language names now resolve, not just codes.** `language.py` gained a
+  `Language.fromname()` fallback (after `fromietf()` and `fromalpha3b()`),
+  so full names like "Portuguese" or "japanese" normalize the same as their
+  ISO codes -- what makes the subtitle-coverage language argument accept
+  plain English names.
+
 ## [0.2.3] - 2026-07-14
 
 ### Fixed

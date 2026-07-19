@@ -22,6 +22,7 @@ from media_insights.api.serializers import (
     serialise_library,
     serialise_track,
 )
+from media_insights.classify import LABELS, misfiled_condition
 from media_insights.config import AppConfig, LibraryConfig, resolve_config_path
 from media_insights.db import get_session, init_engine, run_migrations, session_scope
 from media_insights.events import Dispatcher
@@ -38,6 +39,7 @@ from media_insights.scanner import (
     scan_all,
     scan_library,
 )
+from media_insights.subtitle_coverage import compute_coverage, resolve_language
 from media_insights.web import mount_web
 
 log = logging.getLogger(__name__)
@@ -49,7 +51,7 @@ class IdentifyRequest(BaseModel):
     tmdb_id: int | None = None
     tvdb_id: int | None = None
     anidb_id: int | None = None
-    classification: str | None = None  # "anime" | "tv" | "movie"
+    classification: str | None = None  # "anime" | "tv" | "movie" | "anime_movie"
 
 
 class ClassifyOverride(BaseModel):
@@ -383,21 +385,11 @@ def create_app() -> FastAPI:
 
     def _misfiled_filter(q):
         """Titles whose detected classification disagrees with the library
-        they're sitting in -- the drive-migration cleanup worklist.
-
-        Library kinds and classification labels share the same vocabulary
-        (movie/tv/anime), so a straight inequality is the whole test.
-        `kind: auto` libraries assert nothing, so nothing there can be
-        misfiled.
+        they're sitting in -- the drive-migration cleanup worklist. See
+        classify/misfiled.py for the compatibility rules (an anime movie is
+        correctly filed in a Movies *or* an Anime library).
         """
-        return (
-            q.join(Library, MediaItem.library_id == Library.id)
-            .filter(
-                Library.kind != "auto",
-                MediaItem.classification_label.isnot(None),
-                MediaItem.classification_label != Library.kind,
-            )
-        )
+        return q.join(Library, MediaItem.library_id == Library.id).filter(misfiled_condition())
 
     @app.get("/api/items")
     def list_items(
@@ -516,7 +508,7 @@ def create_app() -> FastAPI:
             from media_insights.discovery.plexmatch import GUID_PREFIXES
             if body.guid.startswith(GUID_PREFIXES):
                 item.match_status = "matched"
-        if body.classification in ("anime", "tv", "movie"):
+        if body.classification in LABELS:
             item.classification_label = body.classification
             item.classification_override = True
         if body.imdb_id or body.tmdb_id or body.tvdb_id or body.anidb_id or body.guid:
@@ -539,8 +531,8 @@ def create_app() -> FastAPI:
         item = session.get(MediaItem, item_id)
         if not item:
             raise HTTPException(404, "item not found")
-        if body.label not in ("anime", "tv", "movie"):
-            raise HTTPException(400, "label must be anime|tv|movie")
+        if body.label not in LABELS:
+            raise HTTPException(400, f"label must be one of: {'|'.join(LABELS)}")
         item.classification_label = body.label
         item.classification_override = True
         item.classification_confidence = 1.0
@@ -629,6 +621,70 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"outcome": outcome}
+
+    @app.get("/api/subtitle-coverage")
+    def subtitle_coverage(
+        language: str | None = None,
+        library: str | None = None,
+        complete: str | None = None,
+        session: Session = Depends(get_session),
+    ) -> dict:
+        """Per-show subtitle-language coverage, scoped to episodic libraries
+        (anime + TV -- movies don't have an "N of M episodes" to report).
+
+        `language` defaults to `subtitles.coverage_language` in config.yaml
+        and resolves any token language.py understands (pt, pt-BR, por,
+        portuguese, ...) to the same normalized code.
+        """
+        cfg = _require_config()
+        token = language or cfg.subtitles.coverage_language
+        resolved = resolve_language(token)
+        if resolved is None:
+            raise HTTPException(400, f"unrecognized language: {token!r}")
+        code, display = resolved
+
+        items = compute_coverage(session, code, library_id=parse_optional_id(library))
+        # Unlike the codebase's usual true-only filters, `complete` is
+        # three-valued (true / false / unset) -- parse_optional_bool() alone
+        # can't tell "unset" from "false", so the raw string is checked first.
+        if complete is not None and complete.strip():
+            want_complete = parse_optional_bool(complete)
+            items = [it for it in items if it.complete == want_complete]
+
+        complete_count = sum(1 for it in items if it.complete)
+        return {
+            "language": code,
+            "language_display": display,
+            "summary": {
+                "complete": complete_count,
+                "incomplete": len(items) - complete_count,
+                "total": len(items),
+            },
+            "items": [
+                {
+                    "item_id": it.item_id,
+                    "title": it.title,
+                    "year": it.year,
+                    "library_id": it.library_id,
+                    "library_name": it.library_name,
+                    "episodes_total": it.episodes_total,
+                    "episodes_with": it.episodes_with,
+                    "episodes_missing": it.episodes_missing,
+                    "complete": it.complete,
+                    "episodes": [
+                        {
+                            "file_id": ep.file_id,
+                            "path": ep.path,
+                            "season": ep.season,
+                            "episode_numbers": ep.episode_numbers,
+                            "has_language": ep.has_language,
+                        }
+                        for ep in it.episodes
+                    ],
+                }
+                for it in items
+            ],
+        }
 
     # ---- Web UI ----
     templates = Jinja2Templates(directory=str(templates_dir)) if templates_dir.is_dir() else None

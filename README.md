@@ -1,6 +1,6 @@
 # media-insights
 
-Indexer and classifier for media libraries. Probe every file with **ffprobe** (and MediaInfo when available), associate files to movies / TV shows via **.plexmatch** or folder-name parsing, classify each title as **anime / tv / movie** using scored rules, watch the filesystem for changes, and emit **{old, new}** events to webhooks / exec hooks so you can hook your own automations on top.
+Indexer and classifier for media libraries. Probe every file with **ffprobe** (and MediaInfo when available), associate files to movies / TV shows via **.plexmatch** or folder-name parsing, classify each title as **anime / tv / movie / anime movie** using scored rules, watch the filesystem for changes, and emit **{old, new}** events to webhooks / exec hooks so you can hook your own automations on top.
 
 Designed for an `*-arr`-style Docker deployment: one `/config` volume for state, one `/data` volume (or many) for the libraries you want indexed.
 
@@ -11,7 +11,8 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes.
 - **Manage libraries from the UI or API — no restart needed.** Add, rename, or remove libraries from `/libraries` or `POST/PUT/DELETE /api/libraries`; changes write straight back into `config.yaml` (comments preserved) and the filesystem watcher picks up the new path immediately.
 - **Offline-first — online only if you say so.** Out of the box no network calls are made at all: titles are matched from `.plexmatch` files and filename/folder parsing ([guessit]). Set `providers.enabled: true` to additionally look titles up against **AniList** (no API key needed), **TMDB** and **TVDB** — which identifies titles the files themselves can't, and fills in imdb/tmdb/tvdb IDs. Results are cached, so a stable library re-scans without touching the network.
 - **Technical truth, normalized.** Every track (video / audio / subtitle, embedded or external sidecar) is its own row — so queries like *"files with no English subtitle"* or *"anything still x264"* are SQL, not file scanning. Episode numbers and titles are extracted per file.
-- **Classification that can disagree with your folders.** Anime / TV / movie labels come from evidence — audio language, release naming, and (when enabled) metadata providers — *not* from which folder a title happens to sit in. The library's `kind` is only a tiebreaker. That's what makes `/misfiled` possible: a worklist of titles whose real identity doesn't match where they're filed. Every verdict carries a confidence and a list of reasons; manual overrides always win.
+- **Classification that can disagree with your folders.** Anime / TV / movie / anime-movie labels come from evidence — audio language, release naming, and (when enabled) metadata providers — *not* from which folder a title happens to sit in. The library's `kind` is only a tiebreaker. That's what makes `/misfiled` possible: a worklist of titles whose real identity doesn't match where they're filed. An anime movie (e.g. *Chainsaw Man: Reze Arc*) is correctly filed in a Movies library *or* an Anime library — anime and movie aren't mutually exclusive. Every verdict carries a confidence and a list of reasons; manual overrides always win.
+- **Subtitle-language coverage search.** Which shows have a given subtitle language (Portuguese by default, configurable) in *every* episode, and for the ones that don't, exactly which episodes are missing it. `GET /api/subtitle-coverage`, `media-insights subtitle-coverage`, and the `/subtitle-coverage` page all answer the same question; the language accepts an ISO code, a locale tag, or a full name (`pt`, `pt-BR`, `portuguese` all resolve the same).
 - **Unmatched queue.** Items without external IDs (and items guessit couldn't even name) land in `/unmatched` for one-click identification.
 - **Watcher + deep scan.** `watchdog` for inotify (with `PollingObserver` fallback for NFS/SMB) plus a periodic deep scan. Files are fingerprinted (BLAKE2b over first/last 8 MiB + size by default) so re-scans skip unchanged work and detect Arr upgrades.
 - **Transactional outbox.** Old and new snapshots are written into the same DB transaction as the file row. A background dispatcher delivers them to webhooks (HMAC-signed) and exec hooks with retries. No loss on crash.
@@ -155,6 +156,11 @@ server:
 ffmpeg:
   ffprobe: ""                # PATH lookup if empty
   mediainfo_cli: ""          # optional; ffprobe-only if absent
+
+subtitles:
+  coverage_language: pt      # default language for subtitle-coverage; any
+                              # token language.py resolves works (pt-BR, por,
+                              # portuguese, ...)
 ```
 
 Override anything from the environment with `MI_`-prefixed env vars, using
@@ -242,6 +248,8 @@ media-insights unmatched                         # list items needing IDs
 media-insights resolve --id 42 --tvdb 71663      # attach external IDs
 media-insights resolve --id 42 --classify anime  # manual classification
 media-insights rescan /data/anime/foo.mkv        # single-path force rescan
+media-insights subtitle-coverage                 # Portuguese coverage, every episodic library
+media-insights subtitle-coverage -L en -l Anime --complete-only
 media-insights config                            # dump resolved config as JSON
 media-insights version
 ```
@@ -261,18 +269,20 @@ media-insights version
 | POST   | `/api/enrich` | look titles up against the configured metadata providers (`?force=true` to re-query cached ones) |
 | GET    | `/api/items/{id}` | full item incl. files + `video_tracks` / `audio_tracks` / `subtitle_tracks` |
 | POST   | `/api/items/{id}/identify` | attach `imdb_id` / `tmdb_id` / `tvdb_id` / `anidb_id` / `guid` / `classification` |
-| POST   | `/api/items/{id}/classification` | override label (`anime`/`tv`/`movie`) |
+| POST   | `/api/items/{id}/classification` | override label (`anime`/`tv`/`movie`/`anime_movie`) |
 | GET    | `/api/unmatched` | items with no external IDs |
 | GET    | `/api/search?q=...` | title / path LIKE search |
 | GET    | `/api/files/{id}` | file + `video_tracks` / `audio_tracks` / `subtitle_tracks` |
 | GET    | `/api/tracks` | query tracks directly — `kind` / `language` / `language_raw` / `is_default` / `is_forced` / `is_sdh` / `is_external` / `library` / `item`; paginate |
+| GET    | `/api/subtitle-coverage` | per-show subtitle-language coverage (anime + TV only) — `language` (defaults to `subtitles.coverage_language`), `library`, `complete` |
 | POST   | `/api/scan` | trigger scan (`?library=Name` to scope) |
 | POST   | `/api/rescan` | body `{"path": "..."}` — single-path rescan |
 
 Web UI pages: `/dashboard`, `/libraries`, `/titles` (browsable, filterable
 list of every title — filter by library/classification/unmatched), `/misfiled`
 (titles whose classification disagrees with the library they're in),
-`/items/{id}`, `/unmatched`, `/events`, `/search`. OpenAPI docs at `/docs`.
+`/subtitle-coverage` (per-show subtitle-language coverage), `/items/{id}`,
+`/unmatched`, `/events`, `/search`. OpenAPI docs at `/docs`.
 
 ## Webhook payload
 
@@ -349,9 +359,23 @@ itself** — not by the folder it happens to live in:
 `confidence` is the winning label's share of the total score, so it reflects
 how far ahead of the alternatives it actually was.
 
+Anime and movie aren't mutually exclusive: a title with strong anime evidence
+(Japanese primary audio, a fansub release group, a provider saying
+`is_anime`) *and* a movie structure (single file, or a provider saying
+`kind: movie`) is labelled **`anime_movie`** — e.g. *Chainsaw Man: Reze Arc*.
+It's correctly filed in a Movies library *or* an Anime library; only a TV
+library disagrees with it.
+
 Titles whose label disagrees with the library they're in are listed at
 `/misfiled` (or `GET /api/items?misfiled=true`) — the cleanup worklist after
-a drive migration shuffles things.
+a drive migration shuffles things. The compatibility table:
+
+| Library `kind` | Accepts |
+|---|---|
+| `movie` | `movie`, `anime_movie` |
+| `tv` | `tv` |
+| `anime` | `anime`, `anime_movie` |
+| `auto` | anything (asserts nothing, so nothing is ever misfiled) |
 
 Per-item manual override (POST `/api/items/{id}/classification`) is sticky and
 always wins. `POST /api/reclassify` re-runs classification across the whole
@@ -413,7 +437,41 @@ Movie.2020.pt-BR.srt        -> language=pt-BR (locale preserved)
 ```
 
 ISO-639 alpha-3 (`eng`) is normalized to alpha-2 (`en`); region tags (`pt-BR`,
-`zh-CN`) are preserved.
+`zh-CN`) are preserved. Normalization accepts ISO codes, IETF locale tags, and
+full English names (`pt`, `pt-BR`, `por`, `portuguese` all resolve to the same
+base language) — see [`language.py`](src/media_insights/language.py).
+
+### Subtitle-language coverage
+
+Which shows have a given subtitle language in *every single episode*, and for
+the ones that don't, exactly which episodes are missing it and how many.
+Scoped to episodic libraries (anime + TV) — a movie is one file, so "N of M
+episodes" doesn't apply to it.
+
+```bash
+media-insights subtitle-coverage                          # subtitles.coverage_language (pt by default)
+media-insights subtitle-coverage --language en             # or any resolvable token: en, eng, english
+media-insights subtitle-coverage --library Anime --complete-only
+media-insights subtitle-coverage --json
+```
+
+```
+Portuguese (pt) subtitle coverage -- 42 show(s)
+
+Complete (Portuguese in every episode): 38
+  Frieren (2023) -- 28/28
+  ...
+
+Incomplete: 4
+  Some Show (2019) -- 10/12, missing 2
+      missing: /data/anime/Some Show/S01E07.mkv
+      missing: /data/anime/Some Show/S01E11.mkv
+```
+
+Same data via `GET /api/subtitle-coverage?language=pt&library=3&complete=false`
+or the `/subtitle-coverage` Web UI page. The default language comes from
+`subtitles.coverage_language` in `config.yaml` (see Configuration above) when
+`language`/`--language` isn't passed explicitly.
 
 ## Fingerprinting
 
@@ -455,7 +513,8 @@ src/media_insights/
   probe/               ffprobe + pymediainfo + normalize
   discovery/           walker, fingerprint, plexmatch, subtitles, grouping
   matching/            parser (guessit), matcher, providers (Protocol)
-  classify/            scored rules -> (label, confidence, reasons[])
+  classify/            scored rules -> (label, confidence, reasons[]); misfiled compatibility
+  subtitle_coverage.py per-show subtitle-language coverage (anime + TV)
   scanner/             service (orchestration + diffing), watcher, scheduler
   events/              bus (outbox), webhook (HMAC), exec, dispatcher
   api/                 FastAPI app + lifespan; REST + Web UI

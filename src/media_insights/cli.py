@@ -9,6 +9,7 @@ from pathlib import Path
 import typer
 
 from media_insights.api import configure, create_app
+from media_insights.classify import LABELS
 from media_insights.config import AppConfig, load_config, resolve_config_path
 from media_insights.db import session_scope
 from media_insights.models import MediaItem
@@ -148,7 +149,7 @@ def cmd_resolve(
     tmdb: int | None = typer.Option(None, "--tmdb"),
     tvdb: int | None = typer.Option(None, "--tvdb"),
     anidb: int | None = typer.Option(None, "--anidb"),
-    classify: str | None = typer.Option(None, "--classify", help="anime|tv|movie"),
+    classify: str | None = typer.Option(None, "--classify", help="anime|tv|movie|anime_movie"),
 ) -> None:
     """Attach IDs to a previously-unmatched item."""
     from media_insights.models import ChangeEvent
@@ -171,7 +172,7 @@ def cmd_resolve(
             item.tvdb_id = tvdb
         if anidb is not None:
             item.anidb_id = anidb
-        if classify in ("anime", "tv", "movie"):
+        if classify in LABELS:
             item.classification_label = classify
             item.classification_override = True
         if item.imdb_id or item.tmdb_id or item.tvdb_id or item.anidb_id:
@@ -201,6 +202,72 @@ def cmd_rescan(path: str) -> None:
     configure(cfg, _config_path())
     outcome = manual_rescan_path(cfg, path, trigger="cli")
     typer.echo(outcome)
+
+
+@app.command("subtitle-coverage")
+def cmd_subtitle_coverage(
+    language: str | None = typer.Option(
+        None, "--language", "-L",
+        help="Language token (pt, pt-BR, por, portuguese, ...); "
+             "defaults to subtitles.coverage_language in config.yaml",
+    ),
+    library: str | None = typer.Option(None, "--library", "-l", help="Scope to one library by name"),
+    complete_only: bool = typer.Option(False, "--complete-only", help="Only list shows with full coverage"),
+    as_json: bool = typer.Option(False, "--json", help="Print raw JSON instead of a formatted report"),
+) -> None:
+    """Which shows have <language> subtitles in every episode, and which episodes are missing them."""
+    import dataclasses
+
+    from media_insights.db import session_scope
+    from media_insights.models import Library
+    from media_insights.subtitle_coverage import compute_coverage, resolve_language
+
+    cfg = _load_cfg(None)
+    configure(cfg, _config_path())
+    token = language or cfg.subtitles.coverage_language
+    resolved = resolve_language(token)
+    if resolved is None:
+        raise typer.BadParameter(f"unrecognized language: {token!r}")
+    code, display = resolved
+
+    with session_scope() as session:
+        library_id = None
+        if library:
+            row = session.query(Library).filter(Library.name == library).one_or_none()
+            if row is None:
+                raise typer.BadParameter(f"no such library: {library}")
+            library_id = row.id
+        items = compute_coverage(session, code, library_id=library_id)
+
+    if complete_only:
+        items = [it for it in items if it.complete]
+
+    if as_json:
+        typer.echo(json.dumps([dataclasses.asdict(it) for it in items], indent=2))
+        return
+
+    complete_items = [it for it in items if it.complete]
+    incomplete_items = [it for it in items if not it.complete]
+
+    typer.echo(f"{display} ({code}) subtitle coverage -- {len(items)} show(s)")
+    typer.echo("")
+    typer.echo(f"Complete ({display} in every episode): {len(complete_items)}")
+    for it in complete_items:
+        typer.echo(f"  {it.title} ({it.year or '?'}) -- {it.episodes_total}/{it.episodes_total}")
+
+    if complete_only:
+        return
+
+    typer.echo("")
+    typer.echo(f"Incomplete: {len(incomplete_items)}")
+    for it in incomplete_items:
+        typer.echo(
+            f"  {it.title} ({it.year or '?'}) -- {it.episodes_with}/{it.episodes_total}, "
+            f"missing {it.episodes_missing}"
+        )
+        for ep in it.episodes:
+            if not ep.has_language:
+                typer.echo(f"      missing: {ep.path}")
 
 
 @app.command("config")

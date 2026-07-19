@@ -38,7 +38,7 @@
       </td>
       <td>{{ row.library.name }} <span class="conf">({{ row.library.kind }})</span></td>
       <td>
-        <strong>{{ row.item.classification_label }}</strong>
+        <strong>{{ row.item.classification_label | replace('_', ' ') }}</strong>
         {% if row.item.classification_confidence is not none %}
           <span class="conf">({{ '%.0f%%' % (row.item.classification_confidence * 100) }})</span>
         {% endif %}

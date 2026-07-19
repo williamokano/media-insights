@@ -200,6 +200,59 @@ def test_confidence_is_a_ratio_against_the_alternatives() -> None:
     assert cls.confidence > 0.8
 
 
+def test_anime_movie_from_japanese_audio_and_movie_structure() -> None:
+    """Chainsaw Man: Reze Arc -- anime, but also a movie. Filed correctly in
+    a Movies library, it must not register as anime (misfiled there) or as a
+    plain movie (losing the anime facet)."""
+    match = MatchResult(
+        title="Chainsaw Man: Reze Arc", year=2025, kind="movie", season=None,
+        episode_numbers=[], match_status="unresolved", library_kind_hint="movie",
+    )
+    files = _mk_files(1)
+    tracks = _mk_tracks(["ja"], ["en"])
+    cls = classify(match, files, tracks)
+    assert cls.label == "anime_movie"
+    assert any("japanese" in r.lower() for r in cls.reasons)
+    assert any("movie" in r.lower() for r in cls.reasons)
+
+
+def test_anime_movie_from_provider_signals_alone() -> None:
+    """No local evidence at all (English audio, no fansub tag) -- only a
+    provider saying is_anime=True + kind=movie can catch this."""
+    from media_insights.matching.providers.base import ProviderSignals
+
+    provider = ProviderSignals(source="anilist", kind="movie", is_anime=True)
+    match = MatchResult(
+        title="Some Anime Film", year=2020, kind="movie", season=None,
+        episode_numbers=[], match_status="unresolved", library_kind_hint="movie",
+    )
+    cls = classify(match, _mk_files(1), _mk_tracks(["en"], []), provider=provider)
+    assert cls.label == "anime_movie"
+
+
+def test_provider_kind_show_prevents_anime_movie_flip() -> None:
+    """_movie_format consults the provider's kind first; a provider saying
+    `show` must block the anime_movie label even with strong anime evidence."""
+    from media_insights.matching.providers.base import ProviderSignals
+
+    provider = ProviderSignals(source="anilist", kind="show", is_anime=True)
+    match = MatchResult(
+        title="Frieren", year=2023, kind="show", season=1,
+        episode_numbers=[1], match_status="matched", library_kind_hint="anime",
+    )
+    cls = classify(match, _mk_files(28), _mk_tracks(["ja"], ["en"]), provider=provider)
+    assert cls.label == "anime"
+
+
+def test_plain_movie_with_no_anime_evidence_stays_movie() -> None:
+    match = MatchResult(
+        title="Interstellar", year=2014, kind="movie", season=None,
+        episode_numbers=[], match_status="matched", library_kind_hint="movie",
+    )
+    cls = classify(match, _mk_files(1), _mk_tracks(["en"], ["en"]))
+    assert cls.label == "movie"
+
+
 def test_manual_override_stored_via_caller() -> None:
     # Manual override behaviour is enforced by the caller; classify returns its
     # best guess but the override flag prevents re-application.
