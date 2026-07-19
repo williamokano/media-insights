@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
+from media_insights.classify import misfiled_condition
 from media_insights.db import get_session
 from media_insights.models import ChangeEvent, Library, MediaItem
 from media_insights.query_params import parse_optional_bool, parse_optional_id
@@ -86,19 +87,13 @@ def mount_web(app: FastAPI, templates: Jinja2Templates | None) -> None:
     ):
         """Titles whose classification disagrees with the library they're in.
 
-        Library kinds and classification labels share the same vocabulary
-        (movie/tv/anime), so the disagreement is a straight inequality.
-        `kind: auto` libraries assert nothing, so nothing in them can be
-        misfiled.
+        See classify/misfiled.py for the compatibility rules (an anime movie
+        is correctly filed in a Movies *or* an Anime library).
         """
         rows = (
             session.query(MediaItem, Library)
             .join(Library, MediaItem.library_id == Library.id)
-            .filter(
-                Library.kind != "auto",
-                MediaItem.classification_label.isnot(None),
-                MediaItem.classification_label != Library.kind,
-            )
+            .filter(misfiled_condition())
             .order_by(Library.name, MediaItem.title)
             .all()
         )
@@ -167,3 +162,36 @@ def mount_web(app: FastAPI, templates: Jinja2Templates | None) -> None:
     @app.get("/search", response_class=HTMLResponse)
     def search_page(request: Request, q: str = ""):
         return templates.TemplateResponse(request, "search.html", {"q": q})
+
+    @app.get("/subtitle-coverage", response_class=HTMLResponse)
+    def subtitle_coverage_page(
+        request: Request,
+        language: str | None = None,
+        library: str | None = None,
+        session: Session = Depends(get_session),
+    ):
+        # Lazy import: same circular-import reason as /libraries above.
+        from media_insights.api.app import state
+        from media_insights.subtitle_coverage import compute_coverage, resolve_language
+
+        cfg = state.config
+        token = language or (cfg.subtitles.coverage_language if cfg else "pt")
+        resolved = resolve_language(token)
+        library_id = parse_optional_id(library)
+        libs = session.query(Library).order_by(Library.name).all()
+
+        items = compute_coverage(session, resolved[0], library_id=library_id) if resolved else []
+        return templates.TemplateResponse(
+            request,
+            "subtitle_coverage.html",
+            {
+                "language_token": token,
+                "language_code": resolved[0] if resolved else None,
+                "language_display": resolved[1] if resolved else None,
+                "unrecognized": resolved is None,
+                "libraries": libs,
+                "library": library_id,
+                "complete_items": [it for it in items if it.complete],
+                "incomplete_items": [it for it in items if not it.complete],
+            },
+        )

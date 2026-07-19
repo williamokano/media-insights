@@ -48,10 +48,10 @@ def test_bibliographic_code_fallback() -> None:
 
 
 def test_unknown_token_kept_as_raw_only() -> None:
-    sc = Path("Movie.klingon.srt")
+    sc = Path("Movie.not-a-real-language-xyz.srt")
     info = parse_sidecar("Movie", sc)
     assert info.language is None
-    assert info.language_raw == "klingon"
+    assert info.language_raw == "not-a-real-language-xyz"
 
 
 def test_default_flag() -> None:

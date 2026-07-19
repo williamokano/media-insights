@@ -26,7 +26,7 @@ from media_insights.matching.parser import ParsedTitle
 from media_insights.matching.providers.base import ProviderSignals
 from media_insights.models import MediaFile, Track
 
-LABELS = ("movie", "tv", "anime")
+LABELS = ("movie", "tv", "anime", "anime_movie")
 
 # The library's kind is a tiebreaker, not evidence. Kept strictly below the
 # weakest real signal (_PARSED_SHOW, 0.15 -- and real signals stack) so that
@@ -162,6 +162,30 @@ def _apply_provider_signals(
         reasons["anime"].append(f"{provider.source} lists this as a series")
 
 
+def _leans_anime(scores: dict[str, float]) -> bool:
+    """Does the evidence favor anime over live-action -- and actually exist?
+
+    Deliberately orthogonal to which label currently has the top score: a
+    single-file title can be a `movie`-format winner while still carrying
+    strong anime evidence (Japanese audio, a fansub tag). That combination is
+    what makes it an anime movie, not a plain movie mislabeled as anime.
+    """
+    return scores["anime"] > scores["tv"] and scores["anime"] > 0
+
+
+def _movie_format(match: MatchResult, provider: ProviderSignals | None) -> bool:
+    """Is this a movie by structure, independent of anime-ness?
+
+    A provider's opinion on kind is stronger evidence than file structure (see
+    _apply_provider_signals), so it's consulted first when available.
+    """
+    if provider is not None and provider.kind == "movie":
+        return True
+    if provider is not None and provider.kind == "show":
+        return False
+    return match.kind == "movie"
+
+
 def classify(
     match: MatchResult,
     files: list[MediaFile],
@@ -239,7 +263,8 @@ def classify(
         reasons[hint_label].append(f"library kind hint = {hint} (tiebreaker only)")
 
     return _pick(
-        scores, reasons, evidence_before_hint, hint_label, manual_override=manual_override
+        scores, reasons, evidence_before_hint, hint_label, manual_override=manual_override,
+        match=match, provider=provider,
     )
 
 
@@ -249,6 +274,8 @@ def _pick(
     evidence_before_hint: dict[str, float],
     hint_label: str | None,
     manual_override: bool,
+    match: MatchResult,
+    provider: ProviderSignals | None,
 ) -> Classification:
     label = max(scores, key=lambda k: scores[k])
 
@@ -270,6 +297,20 @@ def _pick(
     ):
         reasons[label].append(
             f"overrode library kind hint = {hint_label} (evidence for {label} was stronger)"
+        )
+
+    # anime and movie are orthogonal (style vs. format), so a title can be
+    # both -- an anime movie, correctly filed in a Movies library, is neither
+    # "misfiled anime" nor "misfiled movie". Reconciled last, after the
+    # library-hint audit note above, so that note (if either facet earned
+    # one) survives into the merged reasons below.
+    if _leans_anime(scores) and _movie_format(match, provider):
+        merged_reasons = list(dict.fromkeys(reasons["anime"] + reasons["movie"]))
+        anime_movie_total = scores["anime"] + scores["movie"]
+        return Classification(
+            label="anime_movie",
+            confidence=(anime_movie_total / total) if total > 0 else 0.0,
+            reasons=merged_reasons,
         )
 
     return Classification(label=label, confidence=confidence, reasons=reasons[label])

@@ -4,7 +4,7 @@
 <h1>{{ item.title }} {% if item.year %}<span class="year">({{ item.year }})</span>{% endif %}</h1>
 <dl class="metadata">
   <dt>Classification</dt><dd>
-    {{ item.classification_label or '?' }}
+    {{ (item.classification_label or '?') | replace('_', ' ') }}
     {% if item.classification_confidence is not none %}
       <span class="conf">({{ '%.0f%%' % (item.classification_confidence * 100) }})</span>
     {% endif %}
@@ -14,6 +14,7 @@
         <option value="movie">movie</option>
         <option value="tv">tv</option>
         <option value="anime">anime</option>
+        <option value="anime_movie">anime movie</option>
       </select>
     </form>
   </dd>

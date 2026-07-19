@@ -108,3 +108,9 @@ providers:
     enabled: false
     api_key: ""
     pin: ""               # only for user-subscription keys
+
+# Default language for `GET /api/subtitle-coverage` and the
+# `subtitle-coverage` CLI command, when neither passes --language explicitly.
+# Any token language.py can resolve works: pt, pt-BR, por, portuguese, ...
+subtitles:
+  coverage_language: pt
